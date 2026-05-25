@@ -13,7 +13,7 @@ const router = express.Router();
 
 
 router.get("/facebook", getConnectedFacebookPages);
-router.get("/facebook/getPagesbyuserId", getPagesbyuserId);
+router.get("/facebook/getPagesbyuserId/:userId", getPagesbyuserId);
 router.post("/facebook/rotatenow/:pageId",rotateFacebookToken );
 router.post("/directFacebook/post-photo", upload.single("media"), directPost);
 router.post("/postByPageNumber/post-photo", upload.single("media"), postByPageNumber);
