@@ -1,44 +1,34 @@
 import multer from "multer";
 import path from "path";
 
-// Counter for auto-increment
-let counter = 0;
-
-// Set up storage engine for multer
 const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, 'media/'); // Destination folder for images
+  destination: (req, file, cb) => {
+    cb(null, "/tmp"); // ✅ Railway safe folder
   },
-  filename: function (req, file, cb) {
-    // Generate a custom filename: auto-increment + date + original file extension
-    const fileName = `${++counter}_${Date.now()}${path.extname(file.originalname)}`;
+  filename: (req, file, cb) => {
+    const fileName = `${Date.now()}-${file.originalname}`;
     cb(null, fileName);
   }
 });
 
-// File filter for accepting only images
 const fileFilter = (req, file, cb) => {
-  const allowedTypes = [
-    'image/jpeg',
-    'image/jpg',
-    'image/png',
-    'video/mp4',
-    'video/mpeg',
-    'video/quicktime'
+  const allowed = [
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "video/mp4",
+    "video/mpeg",
+    "video/quicktime"
   ];
 
-  if (allowedTypes.includes(file.mimetype)) {
-    cb(null, true);
-  } else {
-    cb(new Error("Only images & videos are allowed."), false);
-  }
+  if (allowed.includes(file.mimetype)) cb(null, true);
+  else cb(new Error("Only images & videos allowed"), false);
 };
 
-// Set up multer middleware
 const upload = multer({
-  storage: storage,
-  fileFilter: fileFilter,
-  limits: { fileSize: 1024 * 1024 * 50 }
+  storage,
+  fileFilter,
+  limits: { fileSize: 50 * 1024 * 1024 }
 });
 
 export default upload;
