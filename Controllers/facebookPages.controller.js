@@ -18,7 +18,7 @@ export const getConnectedFacebookPages = async (req, res) => {
 
 export const getPagesbyuserId = async (req, res, next) => {
   try {
-    const { userId } = req.query;
+    const { userId } = req.params;
 
     // 🔍 Validation
     if (!userId) {
