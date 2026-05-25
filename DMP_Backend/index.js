@@ -1,10 +1,10 @@
 import express from "express";
 import dotenv from "dotenv";
-import DataBaseConnection from "../database/database.js";
+import DataBaseConnection from "./database/database.js";
 import cors from "cors";
-import userroute from "../routes/user.routes.js";
-import authRoutes from "../routes/auth.routes.js";
-import facebookRoutes from "../routes/connectedPages.routes.js";
+import userroute from "./routes/user.routes.js";
+import authRoutes from "./routes/auth.routes.js";
+import facebookRoutes from "./routes/connectedPages.routes.js";
 import path from "path";
 import { fileURLToPath } from "url";
 import cookieParser from "cookie-parser";
@@ -52,51 +52,3 @@ app.listen(port, async () => {
   await DataBaseConnection();
   console.log(`✅ Server running at http://localhost:${port}`);
 });
-
-
-
-
-// import express from "express";
-// import dotenv from "dotenv";
-// import cors from "cors";
-// import DataBaseConnection from "../database/database.js";
-// import userroute from "../routes/user.routes.js";
-// import authRoutes from "../routes/auth.routes.js";
-// import facebookRoutes from "../routes/connectedPages.routes.js";
-
-
-
-// console.log("🚀 Server starting...");
-// dotenv.config();
-
-// const app = express();
-
-// app.use(express.json());
-// app.use(express.urlencoded({ extended: true }));
-
-// const allowedOrigins = [
-//   "http://localhost:3000",
-//   "http://localhost:5678",
-//   "https://sat-tara-frontend.vercel.app"
-// ];
-
-
-// app.use(
-//   cors({
-//     origin: allowedOrigins,
-//     credentials: true
-//   })
-// );
-
-// app.use("/api/user", userroute);
-// app.use("/api/auth", authRoutes);
-// app.use("/api/pages", facebookRoutes);
-
-// app.get("/", (req, res) => {
-//   res.send("✅ Backend droolsad lay kasal");
-// });
-
-
-// DataBaseConnection();
-
-// export default app;
