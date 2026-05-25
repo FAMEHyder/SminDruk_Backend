@@ -25,7 +25,7 @@ const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:3001",
   "http://localhost:5678",
-  "https://smindruk.vercel.app/",
+  "https://smindruk.vercel.app",
 ];
 
 app.use(
