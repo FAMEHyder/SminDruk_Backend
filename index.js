@@ -49,6 +49,10 @@ app.use("/api", facebookRoutes);
 // ✅ Start server AFTER everything
 const port = process.env.PORT || 8009;
 
+app.get("/", (req, res) => {
+  res.send("✅ check 123");
+});
+
 app.listen(port, async () => {
   await DataBaseConnection();
   console.log(`✅ Server running at http://localhost:${port}`);
