@@ -1,0 +1,36 @@
+import express from "express";
+import __route_auth_routes from "./auth.routes.js";
+import __route_user_routes from "./user.routes.js";
+import __route_workspace_routes from "./workspace.routes.js";
+import __route_team_routes from "./team.routes.js";
+import __route_socialAccount_routes from "./socialAccount.routes.js";
+import __route_post_routes from "./post.routes.js";
+import __route_media_routes from "./media.routes.js";
+import __route_ai_routes from "./ai.routes.js";
+import __route_analytics_routes from "./analytics.routes.js";
+import __route_notification_routes from "./notification.routes.js";
+import __route_blog_routes from "./blog.routes.js";
+import __route_contact_routes from "./contact.routes.js";
+import __route_payment_routes from "./payment.routes.js";
+import __route_subscription_routes from "./subscription.routes.js";
+import __route_admin_routes from "./admin.routes.js";
+
+const router = express.Router();
+
+router.use("/auth", __route_auth_routes);
+router.use("/users", __route_user_routes);
+router.use("/workspaces", __route_workspace_routes);
+router.use("/teams", __route_team_routes);
+router.use("/social-accounts", __route_socialAccount_routes);
+router.use("/posts", __route_post_routes);
+router.use("/media", __route_media_routes);
+router.use("/ai", __route_ai_routes);
+router.use("/analytics", __route_analytics_routes);
+router.use("/notifications", __route_notification_routes);
+router.use("/blogs", __route_blog_routes);
+router.use("/contact", __route_contact_routes);
+router.use("/payments", __route_payment_routes);
+router.use("/subscriptions", __route_subscription_routes);
+router.use("/admin", __route_admin_routes);
+
+export default router;
