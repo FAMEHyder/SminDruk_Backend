@@ -22,12 +22,14 @@ const connectDB = async () => {
   }
 
   try {
-    const conn = await mongoose.connect(mongoUrl, {      dbName: process.env.MONGO_DB_NAME || "zarshan",
+    const conn = await mongoose.connect(mongoUrl, {
+      dbName: process.env.MONGO_DB_NAME || "zarshan",
+      serverSelectionTimeoutMS: 30000,
     });
     logger.info(`MongoDB connected: ${conn.connection.host}/${conn.connection.name}`);
   } catch (error) {
     logger.error(`MongoDB connection failed: ${error.message}`);
-    process.exit(1);
+    throw error;
   }
 
   mongoose.connection.on("disconnected", () => {

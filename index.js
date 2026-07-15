@@ -17,6 +17,11 @@ import logger from "./utils/logger.js";
 
 const app = express();
 
+// ---------- Health check (before rate limiter — Railway probes this during deploy) ----------
+app.get("/health", (_req, res) =>
+  res.status(200).json({ status: "ok", service: "zarshan-backend" })
+);
+
 // ---------- Security ----------
 app.use(helmet({ crossOriginResourcePolicy: false }));
 
@@ -47,9 +52,6 @@ app.use(passport.initialize());
 
 // ---------- API docs ----------
 app.use("/api/v1/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
-
-// ---------- Health check ----------
-app.get("/health", (_req, res) => res.status(200).json({ status: "ok", service: "zarshan-backend" }));
 
 // ---------- API routes (versioned) ----------
 app.use("/api/v1", routes);
@@ -86,17 +88,25 @@ const validateEnv = () => {
 
 const startServer = async () => {
   validateEnv();
-  await connectDB();
-  startScheduler();
 
-  app.listen(PORT, () => {
-    logger.info(`Zarshan backend running on http://localhost:${PORT}`);
-    logger.info(`API docs available at http://localhost:${PORT}/api/v1/docs`);
+  // Start listening immediately so Railway healthcheck passes while MongoDB connects.
+  app.listen(PORT, "0.0.0.0", () => {
+    logger.info(`Zarshan backend listening on port ${PORT}`);
+    logger.info(`Health check: http://0.0.0.0:${PORT}/health`);
+  });
+
+  try {
+    await connectDB();
+    startScheduler();
+    logger.info(`API docs available at ${getApiUrl()}/api/v1/docs`);
     logger.info(`Active API URL: ${getApiUrl()}`);
     logger.info(`Active Frontend URL: ${getFrontendUrl()}`);
     logger.info(`Local API: ${getLocalApiUrl()} | Live API: ${getLiveApiUrl()}`);
     logger.info(`CORS origins: ${[...allowedOrigins].join(", ")}`);
-  });
+  } catch (error) {
+    logger.error(`Database startup failed: ${error.message}`);
+    process.exit(1);
+  }
 };
 
 startServer();
