@@ -27,12 +27,24 @@ const parseList = (value) =>
         .filter(Boolean)
     : [];
 
-const isProduction = () => process.env.NODE_ENV === "production";
+const isRailway = () => Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID);
+
+const isProduction = () => process.env.NODE_ENV === "production" || isRailway();
+
+/** Railway injects the public hostname without a scheme, e.g. smindruk.up.railway.app */
+const getRailwayPublicUrl = () => {
+  const domain = process.env.RAILWAY_PUBLIC_DOMAIN?.trim();
+  return domain ? `https://${domain}` : undefined;
+};
 
 /** Active backend base URL — local in dev, live in production. */
 const getApiUrl = () => {
   if (isProduction()) {
-    return trimTrailingSlash(process.env.API_URL_LIVE || process.env.API_URL) || DEFAULT_LIVE_API;
+    return (
+      trimTrailingSlash(process.env.API_URL_LIVE || process.env.API_URL) ||
+      getRailwayPublicUrl() ||
+      DEFAULT_LIVE_API
+    );
   }
   return trimTrailingSlash(process.env.API_URL_LOCAL || process.env.API_URL) || DEFAULT_LOCAL_API;
 };
@@ -98,6 +110,9 @@ export {
   getEnv,
   getMongoUrl,
   getJwtSecret,
+  isRailway,
+  isProduction,
+  getRailwayPublicUrl,
   getApiUrl,
   getFrontendUrl,
   getLocalApiUrl,

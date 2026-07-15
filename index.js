@@ -22,6 +22,10 @@ app.get("/", (_req, res) => {
 const server = app.listen(PORT, "0.0.0.0", () => {
   logger.info(`Zarshan backend listening on port ${PORT}`);
   logger.info(`Health check: http://0.0.0.0:${PORT}/health`);
+  if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+    logger.info(`Railway public URL: https://${process.env.RAILWAY_PUBLIC_DOMAIN}`);
+    logger.info(`If the public URL fails, set Networking target port to ${PORT}`);
+  }
 
   import("./bootstrap.js")
     .then(({ bootstrap }) => bootstrap(app, () => { isReady = true; }))
