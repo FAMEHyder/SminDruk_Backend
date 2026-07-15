@@ -61,6 +61,7 @@ const postValidators = {
     content: z.string().max(2200).optional(),
     platforms: z.array(z.enum(["facebook", "instagram", "linkedin", "x", "tiktok", "pinterest"])).min(1),
     mediaIds: z.array(z.string()).optional(),
+    socialAccountIds: z.array(z.string()).optional(),
     scheduledAt: z.string().datetime().optional(),
     status: z.enum(["draft", "scheduled", "published"]).optional(),
   }),
