@@ -4,20 +4,33 @@ const ALGORITHM = "aes-256-cbc";
 const IV_LENGTH = 16;
 
 /**
- * Derives a stable 32-byte key from ENCRYPTION_KEY (any length string),
- * so users can set a plain passphrase instead of having to generate raw
- * key bytes themselves.
+ * Resolves the encryption secret. Uses ENCRYPTION_KEY first, then falls back to
+ * JWT_SECRET so Railway/production still boots when only auth secrets are set.
+ * Returns null (instead of crashing) when neither is configured.
  */
-const getKey = () => {
-  const secret = process.env.ENCRYPTION_KEY;
-  if (!secret) {
-    throw new Error("ENCRYPTION_KEY is not set. Add it to your .env before connecting social accounts.");
-  }
-  return crypto.createHash("sha256").update(secret).digest();
+const resolveSecret = () => {
+  const secret = (process.env.ENCRYPTION_KEY || process.env.JWT_SECRET || "").trim();
+  return secret || null;
 };
 
+/**
+ * Derives a stable 32-byte key from the resolved secret string.
+ */
+const getKey = () => {
+  const secret = resolveSecret();
+  if (!secret) {
+    throw new Error(
+      "ENCRYPTION_KEY or JWT_SECRET must be set in environment variables (Railway → Variables) before connecting social accounts."
+    );
+  }
+  return crypto.createHash("sha256").update(secret, "utf8").digest();
+};
+
+/** True when token encryption can run (ENCRYPTION_KEY or JWT_SECRET is present). */
+export const isEncryptionConfigured = () => Boolean(resolveSecret());
+
 /** Encrypts a string (e.g. an OAuth access token) for safe storage in MongoDB. */
-const encrypt = (text) => {
+export const encrypt = (text) => {
   const iv = crypto.randomBytes(IV_LENGTH);
   const cipher = crypto.createCipheriv(ALGORITHM, getKey(), iv);
   const encrypted = Buffer.concat([cipher.update(String(text), "utf8"), cipher.final()]);
@@ -25,7 +38,7 @@ const encrypt = (text) => {
 };
 
 /** Decrypts a string previously produced by `encrypt()`. */
-const decrypt = (payload) => {
+export const decrypt = (payload) => {
   const [ivHex, encryptedHex] = String(payload).split(":");
   if (!ivHex || !encryptedHex) throw new Error("Invalid encrypted payload format.");
 
@@ -34,5 +47,3 @@ const decrypt = (payload) => {
   const decrypted = Buffer.concat([decipher.update(Buffer.from(encryptedHex, "hex")), decipher.final()]);
   return decrypted.toString("utf8");
 };
-
-export { encrypt, decrypt };

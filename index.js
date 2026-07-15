@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { notFoundHandler, errorHandler } from "./middleware/error.middleware.js";
 import { globalLimiter } from "./middleware/rateLimiter.middleware.js";
 import { startScheduler } from "./utils/scheduler.js";
@@ -59,7 +60,24 @@ app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
 
+const validateEnv = () => {
+  const missing = [];
+  if (!process.env.MONGO_URL?.trim()) missing.push("MONGO_URL");
+  if (!process.env.JWT_SECRET?.trim()) missing.push("JWT_SECRET");
+
+  if (missing.length) {
+    logger.error(`Missing required environment variables: ${missing.join(", ")}`);
+    logger.error("Add them in Railway → your service → Variables, then redeploy.");
+    process.exit(1);
+  }
+
+  if (!process.env.ENCRYPTION_KEY?.trim()) {
+    logger.warn("ENCRYPTION_KEY is not set — falling back to JWT_SECRET for social token encryption.");
+  }
+};
+
 const startServer = async () => {
+  validateEnv();
   await connectDB();
   startScheduler();
 
