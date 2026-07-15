@@ -17,8 +17,7 @@ dns.setServers(["8.8.8.8", "1.1.1.1"]);
 const connectDB = async () => {
   const mongoUrl = getMongoUrl();
   if (!mongoUrl) {
-    logger.error("MONGO_URL is not set. Add it in Railway → Variables.");
-    process.exit(1);
+    throw new Error("MONGO_URL is not set. Add it in Railway → Variables.");
   }
 
   try {
@@ -38,5 +37,3 @@ const connectDB = async () => {
 };
 
 export default connectDB;
-
-// wevnwevwe
