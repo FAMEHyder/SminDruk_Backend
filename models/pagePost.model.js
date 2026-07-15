@@ -9,6 +9,7 @@ const pagePostSchema = new mongoose.Schema(
     pageId: { type: String, required: true },
     platformPostId: { type: String },
     postLink: { type: String },
+    postContent: { type: String, default: "" },
     success: { type: Boolean, default: true },
     error: { type: String },
   },

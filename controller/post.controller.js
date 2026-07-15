@@ -10,6 +10,8 @@ import ApiResponse from "../utils/apiResponse.js";
 
 import Post from "../models/post.model.js";
 
+import PagePost from "../models/pagePost.model.js";
+
 import Notification from "../models/notification.model.js";
 
 
@@ -96,6 +98,66 @@ const listPosts = asyncHandler(async (req, res) => {
 
   }).send(res);
 
+});
+
+
+
+// GET /api/v1/posts/stats?workspaceId=
+const getPostStats = asyncHandler(async (req, res) => {
+  const { workspaceId } = req.query;
+  if (!workspaceId) throw ApiError.badRequest("workspaceId is required.");
+
+  const [total, published, scheduled, drafts, failed, liveLinks] = await Promise.all([
+    Post.countDocuments({ workspace: workspaceId }),
+    Post.countDocuments({ workspace: workspaceId, status: "published" }),
+    Post.countDocuments({ workspace: workspaceId, status: { $in: ["scheduled", "publishing"] } }),
+    Post.countDocuments({ workspace: workspaceId, status: "draft" }),
+    Post.countDocuments({ workspace: workspaceId, status: "failed" }),
+    PagePost.countDocuments({
+      workspace: workspaceId,
+      success: true,
+      postLink: { $exists: true, $nin: [null, ""] },
+    }),
+  ]);
+
+  return new ApiResponse(200, "Post stats fetched successfully.", {
+    total,
+    published,
+    scheduled,
+    drafts,
+    failed,
+    liveLinks,
+  }).send(res);
+});
+
+
+
+// GET /api/v1/posts/page-links?workspaceId=&page=&limit=
+const listPagePostLinks = asyncHandler(async (req, res) => {
+  const { workspaceId, page = 1, limit = 100 } = req.query;
+  if (!workspaceId) throw ApiError.badRequest("workspaceId is required.");
+
+  const filter = {
+    workspace: workspaceId,
+    success: true,
+    postLink: { $exists: true, $nin: [null, ""] },
+  };
+
+  const [items, total] = await Promise.all([
+    PagePost.find(filter)
+      .populate("post", "content type publishedAt status")
+      .sort({ createdAt: -1 })
+      .skip((Number(page) - 1) * Number(limit))
+      .limit(Number(limit)),
+    PagePost.countDocuments(filter),
+  ]);
+
+  return new ApiResponse(200, "Page post links fetched successfully.", items, {
+    page: Number(page),
+    limit: Number(limit),
+    total,
+    totalPages: Math.ceil(total / Number(limit)),
+  }).send(res);
 });
 
 
@@ -287,6 +349,8 @@ const cronRunScheduler = asyncHandler(async (req, res) => {
 
 export {
   createPost,
+  getPostStats,
+  listPagePostLinks,
   listPosts,
   getPost,
   updatePost,

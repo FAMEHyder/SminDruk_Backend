@@ -1,4 +1,5 @@
 import { encrypt } from "../utils/encrypt.js";
+import { refreshFacebookTokensForAccount, runFacebookTokenRefreshJob } from "../utils/facebookTokenRefresh.js";
 import { getApiUrl, getFrontendUrl } from "../utils/env.js";
 import axios from "axios";
 import crypto from "crypto";
@@ -131,6 +132,8 @@ const facebookConnectCallback = asyncHandler(async (req, res) => {
           tokenExpiresAt,
           status: "connected",
           lastSyncedAt: new Date(),
+          lastTokenRefreshAttemptAt: null,
+          lastTokenRefreshError: null,
         },
         { upsert: true, new: true }
       );
@@ -195,12 +198,12 @@ const refreshAccountToken = asyncHandler(async (req, res) => {
   const account = await SocialAccount.findById(req.params.id);
   if (!account) throw ApiError.notFound("Social account not found.");
 
-  // TODO: call the platform's OAuth token-refresh endpoint using account.refreshToken.
-  account.lastSyncedAt = new Date();
-  account.status = "connected";
-  await account.save();
+  if (account.platform !== "facebook") {
+    throw ApiError.badRequest("Manual token refresh is only supported for Facebook pages right now.");
+  }
 
-  return new ApiResponse(200, "Access token refreshed successfully.").send(res);
+  const result = await refreshFacebookTokensForAccount(account._id);
+  return new ApiResponse(200, "Facebook page tokens refreshed successfully.", result).send(res);
 });
 
 // POST /api/v1/social-accounts/:id/sync
@@ -223,14 +226,34 @@ const checkConnectionStatus = asyncHandler(async (req, res) => {
   return new ApiResponse(200, "Connection status fetched successfully.", {
     status: account.status,
     lastSyncedAt: account.lastSyncedAt,
+    tokenIssuedAt: account.tokenIssuedAt,
+    tokenExpiresAt: account.tokenExpiresAt,
+    lastTokenRefreshAttemptAt: account.lastTokenRefreshAttemptAt,
+    lastTokenRefreshError: account.lastTokenRefreshError,
   }).send(res);
 });
 
-export { connectAccount,
+// POST /api/v1/social-accounts/cron/refresh-tokens — daily job backup (X-Cron-Secret header)
+const cronRefreshTokens = asyncHandler(async (req, res) => {
+  const secret = process.env.CRON_SECRET?.trim();
+  const provided = req.headers["x-cron-secret"];
+
+  if (!secret || provided !== secret) {
+    throw ApiError.unauthorized("Invalid cron secret.");
+  }
+
+  const result = await runFacebookTokenRefreshJob();
+  return new ApiResponse(200, "Facebook token refresh job completed.", result).send(res);
+});
+
+export {
+  connectAccount,
   listAccounts,
   disconnectAccount,
   refreshAccountToken,
   syncAccount,
   checkConnectionStatus,
   facebookConnectStart,
-  facebookConnectCallback, };
+  facebookConnectCallback,
+  cronRefreshTokens,
+};

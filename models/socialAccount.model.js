@@ -32,6 +32,10 @@ const socialAccountSchema = new mongoose.Schema(
     userAccessToken: { type: String, select: false },
     tokenIssuedAt: { type: Date },
     tokenExpiresAt: { type: Date },
+    /** Last daily cron attempt to refresh Facebook tokens (12 PM job). */
+    lastTokenRefreshAttemptAt: { type: Date },
+    /** Error from the most recent failed token refresh attempt. */
+    lastTokenRefreshError: { type: String },
     status: {
       type: String,
       enum: ["connected", "disconnected", "expired", "error"],
@@ -43,5 +47,6 @@ const socialAccountSchema = new mongoose.Schema(
 );
 
 socialAccountSchema.index({ workspace: 1, platform: 1, accountId: 1 }, { unique: true });
+socialAccountSchema.index({ platform: 1, status: 1, tokenIssuedAt: 1 });
 
 export default mongoose.model("SocialAccount", socialAccountSchema);

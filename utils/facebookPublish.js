@@ -3,6 +3,7 @@ import SocialAccount from "../models/socialAccount.model.js";
 import Media from "../models/media.model.js";
 import PagePost from "../models/pagePost.model.js";
 import { decrypt } from "./encrypt.js";
+import { buildFacebookPostLink } from "./facebookPostLink.js";
 import logger from "./logger.js";
 
 const FB_GRAPH_VERSION = "v19.0";
@@ -31,7 +32,7 @@ const publishToFacebookPage = async ({ account, content, type, mediaUrls }) => {
       access_token: token,
     });
     const postId = data.id;
-    return { postId, postLink: postId ? `https://www.facebook.com/${postId}` : null };
+    return { postId, postLink: buildFacebookPostLink(pageId, postId) };
   }
 
   if ((type === "image" || type === "story" || type === "carousel") && hasMedia) {
@@ -41,7 +42,7 @@ const publishToFacebookPage = async ({ account, content, type, mediaUrls }) => {
       access_token: token,
     });
     const postId = data.post_id || data.id;
-    return { postId, postLink: postId ? `https://www.facebook.com/${postId}` : null };
+    return { postId, postLink: buildFacebookPostLink(pageId, postId) };
   }
 
   const { data } = await axios.post(`https://graph.facebook.com/${FB_GRAPH_VERSION}/${pageId}/feed`, {
@@ -49,7 +50,7 @@ const publishToFacebookPage = async ({ account, content, type, mediaUrls }) => {
     access_token: token,
   });
   const postId = data.id;
-  return { postId, postLink: postId ? `https://www.facebook.com/${postId}` : null };
+  return { postId, postLink: buildFacebookPostLink(pageId, postId) };
 };
 
 /**
@@ -98,6 +99,7 @@ const publishPostToFacebookPages = async (post) => {
         pageId: account.accountId,
         platformPostId: postId,
         postLink,
+        postContent: post.content || "",
         success: true,
       });
 

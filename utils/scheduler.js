@@ -2,6 +2,7 @@ import cron from "node-cron";
 import Post from "../models/post.model.js";
 import Notification from "../models/notification.model.js";
 import { executePublish } from "./publishPost.js";
+import { runFacebookTokenRefreshJob } from "./facebookTokenRefresh.js";
 import logger from "./logger.js";
 
 const MAX_RETRY_ATTEMPTS = 3;
@@ -92,18 +93,32 @@ const runScheduledPostsJob = async () => {
 };
 
 /**
- * Registers the every-minute cron job and runs one pass immediately on startup.
+ * Registers cron jobs and runs an initial scheduled-post pass on startup.
  */
 const startScheduler = () => {
   cron.schedule("* * * * *", () => {
     runScheduledPostsJob().catch((error) => logger.error(`Scheduler job crashed: ${error.message}`));
   });
 
+  const cronTimezone = process.env.CRON_TIMEZONE || "Asia/Karachi";
+  const tokenRefreshCron = process.env.FB_TOKEN_REFRESH_CRON || "0 12 * * *";
+
+  cron.schedule(
+    tokenRefreshCron,
+    () => {
+      runFacebookTokenRefreshJob().catch((error) =>
+        logger.error(`Facebook token refresh job crashed: ${error.message}`)
+      );
+    },
+    { timezone: cronTimezone }
+  );
+
   logger.info("Post scheduler started (running every minute).");
+  logger.info(`Facebook token refresh scheduled daily at 12:00 PM (${cronTimezone}).`);
 
   runScheduledPostsJob().catch((error) =>
     logger.error(`Initial scheduler run failed: ${error.message}`)
   );
 };
 
-export { startScheduler, runScheduledPostsJob };
+export { startScheduler, runScheduledPostsJob, runFacebookTokenRefreshJob };
