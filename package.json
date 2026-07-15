@@ -4,6 +4,9 @@
   "description": "SocialFlow - Social Media Management SaaS Backend (Zarshan Backend API)",
   "main": "index.js",
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",

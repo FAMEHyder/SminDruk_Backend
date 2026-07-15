@@ -19,7 +19,7 @@ app.get("/", (_req, res) => {
   res.status(200).json({ status: "ok", service: "zarshan-backend" });
 });
 
-app.listen(PORT, "0.0.0.0", () => {
+const server = app.listen(PORT, "0.0.0.0", () => {
   logger.info(`Zarshan backend listening on port ${PORT}`);
   logger.info(`Health check: http://0.0.0.0:${PORT}/health`);
 
@@ -29,6 +29,19 @@ app.listen(PORT, "0.0.0.0", () => {
       logger.error(`Bootstrap failed: ${error.message}`);
       logger.error(error.stack);
     });
+});
+
+server.on("error", (error) => {
+  logger.error(`Server failed to start: ${error.message}`);
+  process.exit(1);
+});
+
+process.on("unhandledRejection", (reason) => {
+  logger.error(`Unhandled rejection: ${reason?.stack || reason}`);
+});
+
+process.on("uncaughtException", (error) => {
+  logger.error(`Uncaught exception: ${error.stack || error.message}`);
 });
 
 export default app;
