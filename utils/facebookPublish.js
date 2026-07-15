@@ -63,7 +63,7 @@ const publishPostToFacebookPages = async (post) => {
 
   const accounts = await SocialAccount.find({
     _id: { $in: accountIds },
-    workspace: post.workspace,
+    workspace: post.workspace?._id ?? post.workspace,
     platform: "facebook",
     status: "connected",
   }).select("+accessToken");

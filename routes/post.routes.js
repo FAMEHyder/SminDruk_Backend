@@ -6,6 +6,9 @@ import validate from "../middleware/validate.middleware.js";
 
 const router = express.Router();
 
+// External cron (Railway Cron Jobs) — must be before authenticate middleware
+router.post("/cron/run-scheduler", postController.cronRunScheduler);
+
 router.use(authenticate);
 
 router.post("/", validate(postValidators.create), postController.createPost);
