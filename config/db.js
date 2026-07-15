@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import dns from "dns";
 import logger from "../utils/logger.js";
-
+import { getMongoUrl } from "../utils/env.js";
 /**
  * On some Windows/VPN/router setups, Node's own DNS resolver fails to resolve
  * the `_mongodb._tcp.*` SRV record used by `mongodb+srv://` URIs (ECONNREFUSED),
@@ -15,9 +15,14 @@ dns.setServers(["8.8.8.8", "1.1.1.1"]);
  * Reads the connection string from the MONGO_URL environment variable.
  */
 const connectDB = async () => {
+  const mongoUrl = getMongoUrl();
+  if (!mongoUrl) {
+    logger.error("MONGO_URL is not set. Add it in Railway → Variables.");
+    process.exit(1);
+  }
+
   try {
-    const conn = await mongoose.connect(process.env.MONGO_URL, {
-      dbName: process.env.MONGO_DB_NAME || "zarshan",
+    const conn = await mongoose.connect(mongoUrl, {      dbName: process.env.MONGO_DB_NAME || "zarshan",
     });
     logger.info(`MongoDB connected: ${conn.connection.host}/${conn.connection.name}`);
   } catch (error) {

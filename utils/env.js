@@ -5,6 +5,15 @@
 
 const trimTrailingSlash = (value) => (value ? value.replace(/\/+$/, "") : value);
 
+/** Reads an env var (with optional fallbacks), trimming whitespace from key and value. */
+const getEnv = (...keys) => {
+  for (const key of keys) {
+    const value = process.env[key]?.trim();
+    if (value) return value;
+  }
+  return undefined;
+};
+
 const DEFAULT_LOCAL_API = "http://localhost:8000";
 const DEFAULT_LIVE_API = "https://smindruk.up.railway.app";
 const DEFAULT_LOCAL_FRONTEND = "http://localhost:3000";
@@ -59,8 +68,36 @@ const getAllowedOrigins = () =>
     ].filter(Boolean)
   );
 
+/** MongoDB connection string — supports common Railway/Atlas variable names. */
+const getMongoUrl = () => getEnv("MONGO_URL", "MONGODB_URI", "DATABASE_URL");
+
+/** JWT signing secret. */
+const getJwtSecret = () => getEnv("JWT_SECRET", "JWT_SECRET_KEY");
+
+/** All variables that must be present before the server starts. */
+const REQUIRED_ENV_VARS = [
+  { label: "MONGO_URL", getter: getMongoUrl, hint: "MongoDB Atlas connection string (mongodb+srv://...)" },
+  { label: "JWT_SECRET", getter: getJwtSecret, hint: "Random secret for auth tokens" },
+];
+
+/** Recommended production variables (warn if missing, do not crash). */
+const RECOMMENDED_ENV_VARS = [
+  "NODE_ENV",
+  "API_URL_LIVE",
+  "FRONTEND_URL_LIVE",
+  "ENCRYPTION_KEY",
+  "FB_APP_ID",
+  "FB_APP_SECRET",
+  "CLOUDINARY_CLOUD_NAME",
+  "CLOUDINARY_API_KEY",
+  "CLOUDINARY_API_SECRET",
+];
+
 export {
   trimTrailingSlash,
+  getEnv,
+  getMongoUrl,
+  getJwtSecret,
   getApiUrl,
   getFrontendUrl,
   getLocalApiUrl,
@@ -68,4 +105,6 @@ export {
   getLocalFrontendUrl,
   getLiveFrontendUrl,
   getAllowedOrigins,
+  REQUIRED_ENV_VARS,
+  RECOMMENDED_ENV_VARS,
 };

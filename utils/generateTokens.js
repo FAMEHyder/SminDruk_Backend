@@ -1,11 +1,11 @@
 import jwt from "jsonwebtoken";
+import { getJwtSecret } from "./env.js";
 
 // Falls back to JWT_SECRET if a dedicated refresh secret isn't configured yet,
-// so auth works out of the box even before every optional env var is filled in.
-const getRefreshSecret = () => process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET;
+const getRefreshSecret = () => process.env.JWT_REFRESH_SECRET?.trim() || getJwtSecret();
 
 const generateAccessToken = (payload) =>
-  jwt.sign(payload, process.env.JWT_SECRET, {
+  jwt.sign(payload, getJwtSecret(), {
     expiresIn: process.env.JWT_EXPIRES_IN || "15m",
   });
 
@@ -14,10 +14,9 @@ const generateRefreshToken = (payload) =>
     expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || "30d",
   });
 
-const verifyAccessToken = (token) => jwt.verify(token, process.env.JWT_SECRET);
+const verifyAccessToken = (token) => jwt.verify(token, getJwtSecret());
 
 const verifyRefreshToken = (token) => jwt.verify(token, getRefreshSecret());
-
 const generateAuthTokens = (user) => {
   const payload = { id: user._id, email: user.email, role: user.role };
   return {
