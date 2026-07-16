@@ -10,8 +10,11 @@ import logger from "./logger.js";
 
 const FB_GRAPH_VERSION = "v19.0";
 
+/** Random 10–15 second pause between each page publish during bulk post. */
 const waitBetweenPages = () =>
-  new Promise((resolve) => setTimeout(resolve, 1500 + Math.floor(Math.random() * 1500)));
+  new Promise((resolve) =>
+    setTimeout(resolve, Math.floor(Math.random() * (15000 - 10000 + 1)) + 10000)
+  );
 
 const publishConnectedPagePost = async ({ page, content, postType, mediaPath, mediaUrl }) => {
   const token = decrypt(page.pageAccessToken);
