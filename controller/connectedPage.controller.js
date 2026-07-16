@@ -6,7 +6,25 @@ import asyncHandler from "../utils/asyncHandler.js";
 import ApiError from "../utils/apiError.js";
 import ApiResponse from "../utils/apiResponse.js";
 
-// GET /api/v1/connected-pages?workspaceId=
+// GET /api/v1/connected-pages/trending-meta
+const getTrendingMeta = asyncHandler(async (_req, res) => {
+  const [maxPageDoc, categories, totalPages] = await Promise.all([
+    ConnectedPage.findOne({ status: "connected" }).sort({ pageNumber: -1 }).select("pageNumber"),
+    ConnectedPage.distinct("category", {
+      status: "connected",
+      category: { $exists: true, $nin: ["", null] },
+    }),
+    ConnectedPage.countDocuments({ status: "connected" }),
+  ]);
+
+  return new ApiResponse(200, "Trending dataset meta fetched successfully.", {
+    maxPageNumber: maxPageDoc?.pageNumber || 0,
+    totalPages,
+    categories: categories.filter(Boolean).sort((a, b) => a.localeCompare(b)),
+  }).send(res);
+});
+
+// GET /api/v1/connected-pages?workspaceId=  (user's own trending pages in this workspace)
 const listConnectedPages = asyncHandler(async (req, res) => {
   const pages = await ConnectedPage.find({
     workspace: req.query.workspaceId,
@@ -25,7 +43,8 @@ const listConnectedPages = asyncHandler(async (req, res) => {
 
 // POST /api/v1/connected-pages/bulk-post
 const createBulkPost = asyncHandler(async (req, res) => {
-  const { workspaceId, secretKey, content, fromPage, toPage, postType, scheduledAt, mediaId } = req.body;
+  const { workspaceId, secretKey, content, fromPage, toPage, category, postType, scheduledAt, mediaId } =
+    req.body;
 
   if (!workspaceId || !secretKey?.trim() || !content?.trim()) {
     throw ApiError.badRequest("workspaceId, secretKey, and content are required.");
@@ -48,6 +67,7 @@ const createBulkPost = asyncHandler(async (req, res) => {
       content,
       fromPage: from,
       toPage: to,
+      category: category?.trim() || "",
       postType: postType || "text",
       mediaId: mediaId || undefined,
       scheduledAt: parsedScheduledAt,
@@ -63,6 +83,7 @@ const createBulkPost = asyncHandler(async (req, res) => {
     content,
     fromPage: from,
     toPage: to,
+    category: category?.trim() || "",
     postType: postType || "text",
     mediaId,
   });
@@ -118,4 +139,4 @@ const disconnectConnectedPage = asyncHandler(async (req, res) => {
   return new ApiResponse(200, "Connected page disconnected successfully.").send(res);
 });
 
-export { listConnectedPages, createBulkPost, fetchPostsBySecretKey, disconnectConnectedPage };
+export { getTrendingMeta, listConnectedPages, createBulkPost, fetchPostsBySecretKey, disconnectConnectedPage };

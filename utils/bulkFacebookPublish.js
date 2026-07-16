@@ -66,7 +66,8 @@ const publishConnectedPagePost = async ({ page, content, postType, mediaPath, me
 };
 
 /**
- * Publishes to ConnectedPage records in a page-number range (trending dataset).
+ * Publishes to ALL trending-dataset ConnectedPage records in the selected page-number range.
+ * Normal manage-account (SocialAccount) pages are never included.
  */
 const executeBulkPublish = async ({
   workspaceId,
@@ -74,6 +75,7 @@ const executeBulkPublish = async ({
   content,
   fromPage,
   toPage,
+  category,
   postType = "text",
   mediaId,
   mediaPath,
@@ -94,16 +96,20 @@ const executeBulkPublish = async ({
     mediaUrl = media.url;
   }
 
-  const pages = await ConnectedPage.find({
-    workspace: workspaceId,
+  const query = {
     status: "connected",
     pageNumber: { $gte: from, $lte: to },
-  })
-    .sort({ pageNumber: 1 })
-    .select("+pageAccessToken");
+  };
+
+  if (category?.trim()) {
+    query.category = category.trim();
+  }
+
+  const pages = await ConnectedPage.find(query).sort({ pageNumber: 1 }).select("+pageAccessToken");
 
   if (!pages.length) {
-    throw new Error("No connected pages found in the selected page number range.");
+    const categoryHint = category?.trim() ? ` in category "${category.trim()}"` : "";
+    throw new Error(`No trending pages found in range ${from}–${to}${categoryHint}.`);
   }
 
   const results = [];

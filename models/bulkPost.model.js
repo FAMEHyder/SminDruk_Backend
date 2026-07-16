@@ -8,6 +8,7 @@ const bulkPostSchema = new mongoose.Schema(
     content: { type: String, required: true, maxlength: 2200 },
     fromPage: { type: Number, required: true, min: 1 },
     toPage: { type: Number, required: true, min: 1 },
+    category: { type: String, default: "", trim: true },
     postType: {
       type: String,
       enum: ["text", "photo", "video", "reel", "story"],

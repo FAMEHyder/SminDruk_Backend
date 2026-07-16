@@ -115,6 +115,7 @@ const runScheduledBulkPostsJob = async () => {
         content: bulkPost.content,
         fromPage: bulkPost.fromPage,
         toPage: bulkPost.toPage,
+        category: bulkPost.category || "",
         postType: bulkPost.postType,
         mediaId: bulkPost.mediaId,
       });
