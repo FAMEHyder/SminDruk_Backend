@@ -7,6 +7,8 @@ import asyncHandler from "../utils/asyncHandler.js";
 import ApiError from "../utils/apiError.js";
 import ApiResponse from "../utils/apiResponse.js";
 import SocialAccount from "../models/socialAccount.model.js";
+import ConnectedPage from "../models/connectedPage.model.js";
+import { getNextPageNumbers } from "../utils/connectedPageNumbers.js";
 import logger from "../utils/logger.js";
 
 /**
@@ -23,18 +25,21 @@ const FB_PAGE_TOKEN_TTL_DAYS = 60;
 
 const getFacebookRedirectUri = () => `${getApiUrl()}/api/v1/social-accounts/facebook/callback`;
 
-// GET /api/v1/social-accounts/facebook/connect?workspaceId=&userId=
+// GET /api/v1/social-accounts/facebook/connect?workspaceId=&userId=&connectMode=
 const facebookConnectStart = (req, res) => {
-  const { workspaceId, userId } = req.query;
+  const { workspaceId, userId, connectMode = "manage" } = req.query;
 
   if (!workspaceId || !userId) {
     throw ApiError.badRequest("workspaceId and userId are required to start the Facebook connection.");
   }
 
+  const mode = connectMode === "trending" ? "trending" : "manage";
+
   const stateData = encodeURIComponent(
     JSON.stringify({
       workspaceId,
       userId,
+      connectMode: mode,
       nonce: crypto.randomUUID(),
     })
   );
@@ -67,10 +72,12 @@ const facebookConnectCallback = asyncHandler(async (req, res) => {
 
   let workspaceId;
   let userId;
+  let connectMode = "manage";
   try {
     const parsed = JSON.parse(decodeURIComponent(state));
     workspaceId = parsed.workspaceId;
     userId = parsed.userId;
+    connectMode = parsed.connectMode === "trending" ? "trending" : "manage";
   } catch {
     return res.redirect(`${frontendUrl}/dashboard/connect-channels?fb=error`);
   }
@@ -115,6 +122,37 @@ const facebookConnectCallback = asyncHandler(async (req, res) => {
     const tokenIssuedAt = new Date();
     const tokenExpiresAt = new Date(Date.now() + FB_PAGE_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
 
+    if (connectMode === "trending") {
+      const pageNumbers = await getNextPageNumbers(pages);
+
+      for (let i = 0; i < pages.length; i++) {
+        const page = pages[i];
+        await ConnectedPage.findOneAndUpdate(
+          { pageId: page.id },
+          {
+            workspace: workspaceId,
+            connectedBy: userId,
+            pageId: page.id,
+            pageName: page.name,
+            pageNumber: pageNumbers[i],
+            profilePicture: page.picture?.data?.url || "",
+            category: page.category || "",
+            pageAccessToken: encrypt(page.access_token),
+            userAccessToken: encrypt(longUserToken),
+            tokenIssuedAt,
+            tokenExpiresAt,
+            status: "connected",
+            lastSyncedAt: new Date(),
+            lastTokenRefreshAttemptAt: null,
+            lastTokenRefreshError: null,
+          },
+          { upsert: true, new: true }
+        );
+      }
+
+      return res.redirect(`${frontendUrl}/dashboard/connect-channels?fb=connected&mode=trending`);
+    }
+
     for (const page of pages) {
       await SocialAccount.findOneAndUpdate(
         { workspace: workspaceId, platform: "facebook", accountId: page.id },
@@ -139,7 +177,7 @@ const facebookConnectCallback = asyncHandler(async (req, res) => {
       );
     }
 
-    return res.redirect(`${frontendUrl}/dashboard/connect-channels?fb=connected`);
+    return res.redirect(`${frontendUrl}/dashboard/connect-channels?fb=connected&mode=manage`);
   } catch (error) {
     logger.error(`Facebook connect callback failed: ${error.response?.data?.error?.message || error.message}`);
     return res.redirect(`${frontendUrl}/dashboard/connect-channels?fb=error`);

@@ -1,10 +1,11 @@
 import cron from "node-cron";
 import Post from "../models/post.model.js";
+import BulkPost from "../models/bulkPost.model.js";
 import Notification from "../models/notification.model.js";
 import { executePublish } from "./publishPost.js";
+import { executeBulkPublish } from "./bulkFacebookPublish.js";
 import { runFacebookTokenRefreshJob } from "./facebookTokenRefresh.js";
 import logger from "./logger.js";
-
 const MAX_RETRY_ATTEMPTS = 3;
 const STUCK_PUBLISHING_MS = 10 * 60 * 1000;
 
@@ -93,11 +94,70 @@ const runScheduledPostsJob = async () => {
 };
 
 /**
+ * Publishes due bulk posts (trending dataset page-number range posts).
+ */
+const runScheduledBulkPostsJob = async () => {
+  const now = new Date();
+
+  const dueBulkPosts = await BulkPost.find({
+    status: "scheduled",
+    scheduledAt: { $lte: now },
+  }).sort({ scheduledAt: 1 });
+
+  for (const bulkPost of dueBulkPosts) {
+    bulkPost.status = "publishing";
+    await bulkPost.save();
+
+    try {
+      const result = await executeBulkPublish({
+        workspaceId: bulkPost.workspace,
+        secretKey: bulkPost.secretKey,
+        content: bulkPost.content,
+        fromPage: bulkPost.fromPage,
+        toPage: bulkPost.toPage,
+        postType: bulkPost.postType,
+        mediaId: bulkPost.mediaId,
+      });
+
+      bulkPost.status = "published";
+      bulkPost.publishedCount = result.publishedCount;
+      bulkPost.failedCount = result.failedCount;
+      await bulkPost.save();
+
+      await Notification.create({
+        user: bulkPost.createdBy,
+        type: "publish_success",
+        title: "Scheduled bulk post published",
+        message: `Published to ${result.publishedCount} page(s).`,
+        metadata: { bulkPostId: bulkPost._id, secretKey: bulkPost.secretKey },
+      }).catch((error) => logger.warn(`Could not create bulk publish notification: ${error.message}`));
+
+      logger.info(`Scheduled bulk post ${bulkPost._id} published successfully.`);
+    } catch (error) {
+      bulkPost.status = "failed";
+      bulkPost.failureReason = error.message;
+      await bulkPost.save();
+
+      await Notification.create({
+        user: bulkPost.createdBy,
+        type: "publish_failed",
+        title: "Scheduled bulk post failed",
+        message: error.message,
+        metadata: { bulkPostId: bulkPost._id, secretKey: bulkPost.secretKey },
+      }).catch((notifyError) => logger.warn(`Could not create bulk failure notification: ${notifyError.message}`));
+
+      logger.error(`Failed to publish scheduled bulk post ${bulkPost._id}: ${error.message}`);
+    }
+  }
+};
+
+/**
  * Registers cron jobs and runs an initial scheduled-post pass on startup.
  */
 const startScheduler = () => {
   cron.schedule("* * * * *", () => {
     runScheduledPostsJob().catch((error) => logger.error(`Scheduler job crashed: ${error.message}`));
+    runScheduledBulkPostsJob().catch((error) => logger.error(`Bulk scheduler job crashed: ${error.message}`));
   });
 
   const cronTimezone = process.env.CRON_TIMEZONE || "Asia/Karachi";
@@ -119,6 +179,9 @@ const startScheduler = () => {
   runScheduledPostsJob().catch((error) =>
     logger.error(`Initial scheduler run failed: ${error.message}`)
   );
+  runScheduledBulkPostsJob().catch((error) =>
+    logger.error(`Initial bulk scheduler run failed: ${error.message}`)
+  );
 };
 
-export { startScheduler, runScheduledPostsJob, runFacebookTokenRefreshJob };
+export { startScheduler, runScheduledPostsJob, runScheduledBulkPostsJob, runFacebookTokenRefreshJob };
