@@ -12,6 +12,8 @@ import Post from "../models/post.model.js";
 
 import PagePost from "../models/pagePost.model.js";
 
+import BulkPost from "../models/bulkPost.model.js";
+
 import Notification from "../models/notification.model.js";
 
 
@@ -158,6 +160,51 @@ const listPagePostLinks = asyncHandler(async (req, res) => {
     total,
     totalPages: Math.ceil(total / Number(limit)),
   }).send(res);
+});
+
+// GET /api/v1/posts/calendar?workspaceId=
+const listCalendarPosts = asyncHandler(async (req, res) => {
+  const { workspaceId } = req.query;
+  if (!workspaceId) throw ApiError.badRequest("workspaceId is required.");
+
+  const statuses = ["scheduled", "published", "failed", "publishing"];
+
+  const [posts, bulks] = await Promise.all([
+    Post.find({ workspace: workspaceId, status: { $in: statuses } })
+      .populate("media")
+      .sort({ scheduledAt: 1, publishedAt: 1 })
+      .lean(),
+    BulkPost.find({ workspace: workspaceId, status: { $in: statuses } })
+      .sort({ scheduledAt: 1 })
+      .lean(),
+  ]);
+
+  const items = [
+    ...posts.map((post) => ({
+      ...post,
+      platforms: post.platforms?.length ? post.platforms : ["facebook"],
+      kind: "post",
+    })),
+    ...bulks.map((bulk) => ({
+      _id: bulk._id,
+      workspace: bulk.workspace,
+      createdBy: bulk.createdBy,
+      type: bulk.postType || "text",
+      content: bulk.content,
+      media: [],
+      platforms: ["facebook"],
+      status: bulk.status,
+      scheduledAt: bulk.scheduledAt,
+      publishedAt: bulk.status === "published" ? bulk.updatedAt : undefined,
+      retryCount: 0,
+      failureReason: bulk.failureReason,
+      createdAt: bulk.createdAt,
+      updatedAt: bulk.updatedAt,
+      kind: "bulk",
+    })),
+  ];
+
+  return new ApiResponse(200, "Calendar posts fetched successfully.", items).send(res);
 });
 
 
@@ -351,6 +398,7 @@ export {
   createPost,
   getPostStats,
   listPagePostLinks,
+  listCalendarPosts,
   listPosts,
   getPost,
   updatePost,

@@ -1,6 +1,8 @@
 import asyncHandler from "../utils/asyncHandler.js";
 import ApiResponse from "../utils/apiResponse.js";
 import Analytics from "../models/analytics.model.js";
+import { syncWorkspaceFacebookAnalytics } from "../utils/facebookInsights.js";
+import logger from "../utils/logger.js";
 
 // POST /api/v1/analytics (ingest a metrics snapshot — typically called by a sync worker)
 const recordMetrics = asyncHandler(async (req, res) => {
@@ -10,7 +12,16 @@ const recordMetrics = asyncHandler(async (req, res) => {
 
 // GET /api/v1/analytics?workspaceId=&platform=&period=daily|weekly|monthly&from=&to=
 const getReport = asyncHandler(async (req, res) => {
-  const { workspaceId, platform, period = "daily", from, to } = req.query;
+  const { workspaceId, platform, period = "daily", from, to, sync } = req.query;
+
+  // Refresh live Facebook post metrics before building the report (default on).
+  if (workspaceId && sync !== "false") {
+    try {
+      await syncWorkspaceFacebookAnalytics(workspaceId);
+    } catch (error) {
+      logger.warn(`Analytics sync skipped: ${error.message}`);
+    }
+  }
 
   const filter = { workspace: workspaceId, period };
   if (platform) filter.platform = platform;
@@ -32,7 +43,24 @@ const getReport = asyncHandler(async (req, res) => {
     { likes: 0, shares: 0, comments: 0, reach: 0, impressions: 0, clicks: 0, followers: 0 }
   );
 
-  return new ApiResponse(200, "Analytics report generated successfully.", { records, totals }).send(res);
+  const byPlatform = {};
+  for (const record of records) {
+    const key = record.platform || "facebook";
+    if (!byPlatform[key]) {
+      byPlatform[key] = { platform: key, likes: 0, comments: 0, shares: 0, reach: 0, impressions: 0 };
+    }
+    byPlatform[key].likes += record.metrics.likes || 0;
+    byPlatform[key].comments += record.metrics.comments || 0;
+    byPlatform[key].shares += record.metrics.shares || 0;
+    byPlatform[key].reach += record.metrics.reach || 0;
+    byPlatform[key].impressions += record.metrics.impressions || 0;
+  }
+
+  return new ApiResponse(200, "Analytics report generated successfully.", {
+    records,
+    totals,
+    byPlatform: Object.values(byPlatform),
+  }).send(res);
 });
 
 export { recordMetrics, getReport };

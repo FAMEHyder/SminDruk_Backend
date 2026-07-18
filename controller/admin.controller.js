@@ -200,8 +200,21 @@ const manageUsers = asyncHandler(async (req, res) => {
 
   const filter = {};
   if (search) {
-    const regex = new RegExp(search, "i");
+    const escaped = String(search).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regex = new RegExp(escaped, "i");
+    const parts = String(search).trim().split(/\s+/).filter(Boolean);
     filter.$or = [{ email: regex }, { firstName: regex }, { lastName: regex }];
+    if (parts.length >= 2) {
+      filter.$or.push({
+        $expr: {
+          $regexMatch: {
+            input: { $concat: ["$firstName", " ", "$lastName"] },
+            regex: escaped,
+            options: "i",
+          },
+        },
+      });
+    }
   }
   if (role) filter.role = role;
   if (isActive !== undefined) filter.isActive = isActive === "true";
@@ -317,7 +330,7 @@ const manageWorkspaces = asyncHandler(async (req, res) => {
   const { skip, page: p, limit: l } = paginate(page, limit);
 
   const filter = {};
-  if (search) filter.name = new RegExp(search, "i");
+  if (search) filter.name = new RegExp(String(search).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
   if (isActive !== undefined) filter.isActive = isActive === "true";
 
   const [items, total] = await Promise.all([
@@ -398,33 +411,113 @@ const managePosts = asyncHandler(async (req, res) => {
   const { status, page = 1, limit = 20, search } = req.query;
   const { skip, page: p, limit: l } = paginate(page, limit);
 
-  const filter = {};
-  if (status) filter.status = status === "drafts" ? "draft" : status;
-  if (search) filter.content = new RegExp(search, "i");
+  const resolvedStatus = status === "drafts" ? "draft" : status || undefined;
+  const searchRegex = search
+    ? new RegExp(String(search).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")
+    : null;
 
-  const [items, total] = await Promise.all([
-    Post.find(filter)
+  const postFilter = {};
+  if (resolvedStatus) postFilter.status = resolvedStatus;
+  if (searchRegex) postFilter.content = searchRegex;
+
+  const bulkFilter = {};
+  if (resolvedStatus && resolvedStatus !== "draft") bulkFilter.status = resolvedStatus;
+  if (searchRegex) bulkFilter.content = searchRegex;
+
+  const includeBulk = !resolvedStatus || resolvedStatus !== "draft";
+  const includePagePosts = !resolvedStatus || resolvedStatus === "published";
+
+  const [posts, bulks, pagePosts] = await Promise.all([
+    Post.find(postFilter)
       .populate("workspace", "name")
       .populate("createdBy", "firstName lastName email")
       .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(l),
-    Post.countDocuments(filter),
+      .lean(),
+    includeBulk
+      ? BulkPost.find(bulkFilter)
+          .populate("workspace", "name")
+          .populate("createdBy", "firstName lastName email")
+          .sort({ createdAt: -1 })
+          .lean()
+      : Promise.resolve([]),
+    includePagePosts
+      ? PagePost.find({
+          success: true,
+          ...(searchRegex ? { postContent: searchRegex } : {}),
+        })
+          .populate("workspace", "name")
+          .sort({ createdAt: -1 })
+          .limit(500)
+          .lean()
+      : Promise.resolve([]),
   ]);
+
+  const mapped = [
+    ...posts.map((post) => ({
+      ...post,
+      source: "post",
+    })),
+    ...bulks.map((bulk) => ({
+      _id: bulk._id,
+      content: bulk.content,
+      type: bulk.postType || "text",
+      status: bulk.status,
+      platforms: ["facebook"],
+      scheduledAt: bulk.scheduledAt,
+      publishedAt: bulk.status === "published" ? bulk.updatedAt : undefined,
+      failureReason: bulk.failureReason,
+      workspace: bulk.workspace,
+      createdBy: bulk.createdBy,
+      createdAt: bulk.createdAt,
+      source: "bulk",
+    })),
+    ...pagePosts.map((pp) => ({
+      _id: pp._id,
+      content: pp.postContent || `(Facebook) ${pp.pageName}`,
+      type: "text",
+      status: "published",
+      platforms: ["facebook"],
+      publishedAt: pp.createdAt,
+      workspace: pp.workspace,
+      createdBy: undefined,
+      createdAt: pp.createdAt,
+      failureReason: undefined,
+      source: "page",
+    })),
+  ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+  const total = mapped.length;
+  const items = mapped.slice(skip, skip + l);
 
   return new ApiResponse(200, "Posts fetched successfully.", items, {
     page: p,
     limit: l,
     total,
-    totalPages: Math.ceil(total / l),
+    totalPages: Math.ceil(total / l) || 1,
   }).send(res);
 });
 
 const deletePostAdmin = asyncHandler(async (req, res) => {
-  const post = await Post.findByIdAndDelete(req.params.id);
-  if (!post) throw ApiError.notFound("Post not found.");
-  await logAdminAction(req, `Post deleted: ${post._id}`, { postId: post._id });
-  return new ApiResponse(200, "Post deleted successfully.").send(res);
+  const id = req.params.id;
+  const post = await Post.findByIdAndDelete(id);
+  if (post) {
+    await logAdminAction(req, `Post deleted: ${post._id}`, { postId: post._id });
+    return new ApiResponse(200, "Post deleted successfully.").send(res);
+  }
+
+  const bulk = await BulkPost.findByIdAndDelete(id);
+  if (bulk) {
+    await logAdminAction(req, `Bulk post deleted: ${bulk._id}`, { bulkPostId: bulk._id });
+    return new ApiResponse(200, "Post deleted successfully.").send(res);
+  }
+
+  const pagePost = await PagePost.findByIdAndDelete(id);
+  if (pagePost) {
+    await logAdminAction(req, `Page post deleted: ${pagePost._id}`, { pagePostId: pagePost._id });
+    return new ApiResponse(200, "Post deleted successfully.").send(res);
+  }
+
+  throw ApiError.notFound("Post not found.");
 });
 
 // ─── Social Accounts ─────────────────────────────────────────
@@ -441,7 +534,7 @@ const getSocialAccountsOverview = asyncHandler(async (req, res) => {
   }
 
   if (search) {
-    const regex = new RegExp(search, "i");
+    const regex = new RegExp(String(search).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
     manageFilter.accountName = regex;
     datasetFilter.pageName = regex;
   }

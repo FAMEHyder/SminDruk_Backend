@@ -14,6 +14,7 @@ router.use(authenticate);
 router.post("/", validate(postValidators.create), postController.createPost);
 router.get("/stats", postController.getPostStats);
 router.get("/page-links", postController.listPagePostLinks);
+router.get("/calendar", postController.listCalendarPosts);
 router.get("/", postController.listPosts);
 router.get("/:id", postController.getPost);
 router.patch("/:id", postController.updatePost);

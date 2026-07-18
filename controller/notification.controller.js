@@ -16,7 +16,10 @@ const listNotifications = asyncHandler(async (req, res) => {
     Notification.countDocuments({ user: req.user._id, isRead: false }),
   ]);
 
-  return new ApiResponse(200, "Notifications fetched successfully.", items, {
+  return new ApiResponse(200, "Notifications fetched successfully.", {
+    items,
+    unreadCount,
+  }, {
     page: Number(page),
     limit: Number(limit),
     total,

@@ -11,16 +11,18 @@ import sendEmail from "../utils/sendEmail.js";
 import logger from "../utils/logger.js";
 
 const REFRESH_TOKEN_TTL_DAYS = 30;
+const REMEMBER_REFRESH_TOKEN_TTL_DAYS = 3650; // ~10 years — until user logs out
 
-const issueTokensForUser = async (user, req) => {
-  const { accessToken, refreshToken } = generateAuthTokens(user);
+const issueTokensForUser = async (user, req, rememberMe = false) => {
+  const { accessToken, refreshToken } = generateAuthTokens(user, rememberMe);
+  const ttlDays = rememberMe ? REMEMBER_REFRESH_TOKEN_TTL_DAYS : REFRESH_TOKEN_TTL_DAYS;
 
   await RefreshToken.create({
     user: user._id,
     token: refreshToken,
     userAgent: req.headers["user-agent"],
     ipAddress: req.ip,
-    expiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000),
+    expiresAt: new Date(Date.now() + ttlDays * 24 * 60 * 60 * 1000),
   });
 
   return { accessToken, refreshToken };
@@ -111,7 +113,7 @@ const resendVerification = asyncHandler(async (req, res) => {
 
 // POST /api/v1/auth/login
 const login = asyncHandler(async (req, res) => {
-  const { email, password } = req.body;
+  const { email, password, rememberMe = false } = req.body;
 
   const user = await User.findOne({ email }).select("+password");
   if (!user || !user.password || !(await user.comparePassword(password))) {
@@ -123,7 +125,7 @@ const login = asyncHandler(async (req, res) => {
     throw ApiError.forbidden("This account has been deactivated.");
   }
 
-  const { accessToken, refreshToken } = await issueTokensForUser(user, req);
+  const { accessToken, refreshToken } = await issueTokensForUser(user, req, Boolean(rememberMe));
   await AuditLog.create({ user: user._id, event: "user_login", ipAddress: req.ip });
 
   return new ApiResponse(200, "Logged in successfully.", {
@@ -165,7 +167,10 @@ const refreshToken = asyncHandler(async (req, res) => {
   stored.revoked = true;
   await stored.save();
 
-  const tokens = await issueTokensForUser(user, req);
+  // Keep long-lived "remember me" sessions alive across silent token refresh.
+  const rememberMe =
+    stored.expiresAt.getTime() - Date.now() > REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000;
+  const tokens = await issueTokensForUser(user, req, rememberMe);
 
   return new ApiResponse(200, "Token refreshed successfully.", tokens).send(res);
 });
