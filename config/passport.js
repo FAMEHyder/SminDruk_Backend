@@ -1,7 +1,12 @@
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import { Strategy as GitHubStrategy } from "passport-github2";
 import { Strategy as FacebookStrategy } from "passport-facebook";
-import { getApiUrl } from "../utils/env.js";
+import {
+  getApiUrl,
+  getGoogleCallbackUrl,
+  getGoogleClientId,
+  getGoogleClientSecret,
+} from "../utils/env.js";
 import passport from "passport";
 import User from "../models/user.model.js";
 import logger from "../utils/logger.js";
@@ -11,19 +16,25 @@ import logger from "../utils/logger.js";
  * Shared by all three OAuth strategies below.
  */
 const findOrCreateOAuthUser = async ({ provider, providerId, email, firstName, lastName, avatar }) => {
+  if (!email) {
+    throw new Error(`${provider} account did not provide an email address.`);
+  }
+
   let user = await User.findOne({ $or: [{ email }, { [`oauth.${provider}Id`]: providerId }] });
 
   if (!user) {
     user = await User.create({
-      firstName,
-      lastName,
+      firstName: firstName || "User",
+      lastName: lastName || "",
       email,
-      avatar,
+      avatar: avatar || "",
       isEmailVerified: true,
       oauth: { [`${provider}Id`]: providerId },
     });
   } else if (!user.oauth?.[`${provider}Id`]) {
-    user.oauth = { ...user.oauth, [`${provider}Id`]: providerId };
+    user.set(`oauth.${provider}Id`, providerId);
+    if (!user.isEmailVerified) user.isEmailVerified = true;
+    if (avatar && !user.avatar) user.avatar = avatar;
     await user.save();
   }
 
@@ -31,14 +42,17 @@ const findOrCreateOAuthUser = async ({ provider, providerId, email, firstName, l
 };
 
 const API_URL = getApiUrl();
+const googleClientId = getGoogleClientId();
+const googleClientSecret = getGoogleClientSecret();
 
-if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+if (googleClientId && googleClientSecret) {
+  const callbackURL = getGoogleCallbackUrl();
   passport.use(
     new GoogleStrategy(
       {
-        clientID: process.env.GOOGLE_CLIENT_ID,
-        clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-        callbackURL: process.env.GOOGLE_CALLBACK_URL || `${API_URL}/api/v1/auth/google/callback`,
+        clientID: googleClientId,
+        clientSecret: googleClientSecret,
+        callbackURL,
       },
       async (_accessToken, _refreshToken, profile, done) => {
         try {
@@ -58,15 +72,18 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
       }
     )
   );
+  logger.info(`Google OAuth enabled — callback: ${callbackURL}`);
+} else {
+  logger.warn("Google OAuth disabled — set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET (or Google_Client_ID / Google_Client_Secret).");
 }
 
-if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
+if (process.env.GITHUB_CLIENT_ID?.trim() && process.env.GITHUB_CLIENT_SECRET?.trim()) {
   passport.use(
     new GitHubStrategy(
       {
-        clientID: process.env.GITHUB_CLIENT_ID,
-        clientSecret: process.env.GITHUB_CLIENT_SECRET,
-        callbackURL: process.env.GITHUB_CALLBACK_URL || `${API_URL}/api/v1/auth/github/callback`,
+        clientID: process.env.GITHUB_CLIENT_ID.trim(),
+        clientSecret: process.env.GITHUB_CLIENT_SECRET.trim(),
+        callbackURL: process.env.GITHUB_CALLBACK_URL?.trim() || `${API_URL}/api/v1/auth/github/callback`,
       },
       async (_accessToken, _refreshToken, profile, done) => {
         try {
@@ -88,13 +105,13 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
   );
 }
 
-if (process.env.FB_APP_ID && process.env.FB_APP_SECRET) {
+if (process.env.FB_APP_ID?.trim() && process.env.FB_APP_SECRET?.trim()) {
   passport.use(
     new FacebookStrategy(
       {
-        clientID: process.env.FB_APP_ID,
-        clientSecret: process.env.FB_APP_SECRET,
-        callbackURL: process.env.FB_CALLBACK_URL || `${API_URL}/api/v1/auth/facebook/callback`,
+        clientID: process.env.FB_APP_ID.trim(),
+        clientSecret: process.env.FB_APP_SECRET.trim(),
+        callbackURL: process.env.FB_CALLBACK_URL?.trim() || `${API_URL}/api/v1/auth/facebook/callback`,
         profileFields: ["id", "emails", "name", "photos"],
       },
       async (_accessToken, _refreshToken, profile, done) => {

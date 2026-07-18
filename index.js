@@ -1,6 +1,11 @@
-import "dotenv/config";
+import path from "path";
+import { fileURLToPath } from "url";
+import dotenv from "dotenv";
 import express from "express";
 import logger from "./utils/logger.js";
+
+// Always load Backend/.env from this file's directory (not process.cwd()).
+dotenv.config({ path: path.join(path.dirname(fileURLToPath(import.meta.url)), ".env") });
 
 const app = express();
 const PORT = Number(process.env.PORT) || 5000;

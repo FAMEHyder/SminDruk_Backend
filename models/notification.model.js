@@ -11,6 +11,7 @@ const notificationSchema = new mongoose.Schema(
         "schedule_success",
         "team_invitation",
         "password_changed",
+        "admin_broadcast",
       ],
       required: true,
     },

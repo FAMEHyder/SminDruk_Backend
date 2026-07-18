@@ -1,11 +1,14 @@
 import { authValidators } from "../utils/validators.js";
 import { authLimiter } from "../middleware/rateLimiter.middleware.js";
+import { getFrontendUrl } from "../utils/env.js";
 import express from "express";
 import passport from "passport";
 import * as authController from "../controller/auth.controller.js";
 import validate from "../middleware/validate.middleware.js";
 
 const router = express.Router();
+
+const oauthFailureRedirect = () => `${getFrontendUrl()}/login?oauth=error`;
 
 router.post("/register", authLimiter, validate(authValidators.register), authController.register);
 router.post("/login", authLimiter, validate(authValidators.login), authController.login);
@@ -51,7 +54,22 @@ router.get(
 router.get(
   "/google/callback",
   requireStrategy("google"),
-  passport.authenticate("google", { session: false, failureRedirect: "/login" }),
+  (req, res, next) =>
+    passport.authenticate("google", {
+      session: false,
+      failureRedirect: oauthFailureRedirect(),
+    })(req, res, next),
+  authController.oauthCallback
+);
+/** Alias for Google Console apps registered with /auth/callback/google */
+router.get(
+  "/callback/google",
+  requireStrategy("google"),
+  (req, res, next) =>
+    passport.authenticate("google", {
+      session: false,
+      failureRedirect: oauthFailureRedirect(),
+    })(req, res, next),
   authController.oauthCallback
 );
 
@@ -64,7 +82,11 @@ router.get(
 router.get(
   "/github/callback",
   requireStrategy("github"),
-  passport.authenticate("github", { session: false, failureRedirect: "/login" }),
+  (req, res, next) =>
+    passport.authenticate("github", {
+      session: false,
+      failureRedirect: oauthFailureRedirect(),
+    })(req, res, next),
   authController.oauthCallback
 );
 
@@ -77,7 +99,11 @@ router.get(
 router.get(
   "/facebook/callback",
   requireStrategy("facebook"),
-  passport.authenticate("facebook", { session: false, failureRedirect: "/login" }),
+  (req, res, next) =>
+    passport.authenticate("facebook", {
+      session: false,
+      failureRedirect: oauthFailureRedirect(),
+    })(req, res, next),
   authController.oauthCallback
 );
 

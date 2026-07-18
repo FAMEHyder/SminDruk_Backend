@@ -41,28 +41,52 @@ const getRailwayPublicUrl = () => {
 const getApiUrl = () => {
   if (isProduction()) {
     return (
-      trimTrailingSlash(process.env.API_URL_LIVE || process.env.API_URL) ||
+      trimTrailingSlash(getEnv("API_URL_LIVE", "API_URL")) ||
       getRailwayPublicUrl() ||
       DEFAULT_LIVE_API
     );
   }
-  return trimTrailingSlash(process.env.API_URL_LOCAL || process.env.API_URL) || DEFAULT_LOCAL_API;
+  return trimTrailingSlash(getEnv("API_URL_LOCAL", "API_URL")) || DEFAULT_LOCAL_API;
 };
 
 /** Active frontend base URL — used for OAuth/password-reset redirects. */
 const getFrontendUrl = () => {
   if (isProduction()) {
-    return trimTrailingSlash(process.env.FRONTEND_URL_LIVE || process.env.FRONTEND_URL) || DEFAULT_LIVE_FRONTEND;
+    return trimTrailingSlash(getEnv("FRONTEND_URL_LIVE", "FRONTEND_URL")) || DEFAULT_LIVE_FRONTEND;
   }
-  return trimTrailingSlash(process.env.FRONTEND_URL_LOCAL || process.env.FRONTEND_URL) || DEFAULT_LOCAL_FRONTEND;
+  return trimTrailingSlash(getEnv("FRONTEND_URL_LOCAL", "FRONTEND_URL")) || DEFAULT_LOCAL_FRONTEND;
 };
 
-const getLocalApiUrl = () => trimTrailingSlash(process.env.API_URL_LOCAL || process.env.API_URL) || DEFAULT_LOCAL_API;
-const getLiveApiUrl = () => trimTrailingSlash(process.env.API_URL_LIVE || process.env.API_URL) || DEFAULT_LIVE_API;
+const getLocalApiUrl = () => trimTrailingSlash(getEnv("API_URL_LOCAL", "API_URL")) || DEFAULT_LOCAL_API;
+const getLiveApiUrl = () => trimTrailingSlash(getEnv("API_URL_LIVE", "API_URL")) || DEFAULT_LIVE_API;
 const getLocalFrontendUrl = () =>
-  trimTrailingSlash(process.env.FRONTEND_URL_LOCAL || process.env.FRONTEND_URL) || DEFAULT_LOCAL_FRONTEND;
+  trimTrailingSlash(getEnv("FRONTEND_URL_LOCAL", "FRONTEND_URL")) || DEFAULT_LOCAL_FRONTEND;
 const getLiveFrontendUrl = () =>
-  trimTrailingSlash(process.env.FRONTEND_URL_LIVE || process.env.FRONTEND_URL) || DEFAULT_LIVE_FRONTEND;
+  trimTrailingSlash(getEnv("FRONTEND_URL_LIVE", "FRONTEND_URL")) || DEFAULT_LIVE_FRONTEND;
+
+/** Google OAuth — supports both GOOGLE_* and Google_* .env key styles. */
+const getGoogleClientId = () => getEnv("GOOGLE_CLIENT_ID", "Google_Client_ID");
+const getGoogleClientSecret = () => getEnv("GOOGLE_CLIENT_SECRET", "Google_Client_Secret");
+
+/**
+ * Callback URL for Google Cloud Console.
+ * Uses the active API host (local vs live) and preserves the path from
+ * GOOGLE_CALLBACK_URL / Google_Redirect_URI when provided.
+ */
+const getGoogleCallbackUrl = () => {
+  const fromEnv = getEnv("GOOGLE_CALLBACK_URL", "Google_Redirect_URI", "GOOGLE_REDIRECT_URI");
+  let path = "/api/v1/auth/google/callback";
+
+  if (fromEnv) {
+    try {
+      path = new URL(fromEnv).pathname || path;
+    } catch {
+      if (fromEnv.startsWith("/")) path = fromEnv;
+    }
+  }
+
+  return `${getApiUrl()}${path.startsWith("/") ? path : `/${path}`}`;
+};
 
 /**
  * CORS allow-list — always includes local + live frontends so you can develop
@@ -75,7 +99,9 @@ const getAllowedOrigins = () =>
       getLocalFrontendUrl(),
       getLiveFrontendUrl(),
       "http://localhost:3000",
+      "http://localhost:3001",
       "http://127.0.0.1:3000",
+      "http://127.0.0.1:3001",
       DEFAULT_LIVE_FRONTEND,
     ].filter(Boolean)
   );
@@ -103,6 +129,8 @@ const RECOMMENDED_ENV_VARS = [
   "CLOUDINARY_CLOUD_NAME",
   "CLOUDINARY_API_KEY",
   "CLOUDINARY_API_SECRET",
+  "GOOGLE_CLIENT_ID",
+  "GOOGLE_CLIENT_SECRET",
 ];
 
 export {
@@ -110,6 +138,9 @@ export {
   getEnv,
   getMongoUrl,
   getJwtSecret,
+  getGoogleClientId,
+  getGoogleClientSecret,
+  getGoogleCallbackUrl,
   isRailway,
   isProduction,
   getRailwayPublicUrl,
