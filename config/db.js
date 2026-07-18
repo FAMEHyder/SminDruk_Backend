@@ -22,7 +22,7 @@ const connectDB = async () => {
 
   try {
     const conn = await mongoose.connect(mongoUrl, {
-      dbName: process.env.MONGO_DB_NAME || "zarshan",
+      dbName: process.env.MONGO_DB_NAME || "smindruk",
       serverSelectionTimeoutMS: 30000,
     });
     logger.info(`MongoDB connected: ${conn.connection.host}/${conn.connection.name}`);

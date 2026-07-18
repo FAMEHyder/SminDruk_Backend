@@ -8,7 +8,7 @@ import Media from "../models/media.model.js";
 const uploadMedia = asyncHandler(async (req, res) => {
   if (!req.file) throw ApiError.badRequest("No file was uploaded.");
 
-  const result = await uploadToCloudinary(req.file.path, "zarshan/media-library");
+  const result = await uploadToCloudinary(req.file.path, "smindruk/media-library");
 
   const media = await Media.create({
     workspace: req.body.workspaceId,

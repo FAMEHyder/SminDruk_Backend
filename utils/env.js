@@ -69,23 +69,15 @@ const getGoogleClientId = () => getEnv("GOOGLE_CLIENT_ID", "Google_Client_ID");
 const getGoogleClientSecret = () => getEnv("GOOGLE_CLIENT_SECRET", "Google_Client_Secret");
 
 /**
- * Callback URL for Google Cloud Console.
- * Uses the active API host (local vs live) and preserves the path from
- * GOOGLE_CALLBACK_URL / Google_Redirect_URI when provided.
+ * Google OAuth callback — always the live Railway URI (never localhost).
+ * Must match Google Cloud Console Authorized redirect URI exactly.
  */
 const getGoogleCallbackUrl = () => {
   const fromEnv = getEnv("GOOGLE_CALLBACK_URL", "Google_Redirect_URI", "GOOGLE_REDIRECT_URI");
-  let path = "/api/v1/auth/google/callback";
+  if (fromEnv?.startsWith("http")) return trimTrailingSlash(fromEnv);
 
-  if (fromEnv) {
-    try {
-      path = new URL(fromEnv).pathname || path;
-    } catch {
-      if (fromEnv.startsWith("/")) path = fromEnv;
-    }
-  }
-
-  return `${getApiUrl()}${path.startsWith("/") ? path : `/${path}`}`;
+  const path = fromEnv?.startsWith("/") ? fromEnv : "/api/v1/auth/callback/google";
+  return `${getLiveApiUrl()}${path}`;
 };
 
 /**

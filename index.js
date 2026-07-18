@@ -15,17 +15,17 @@ let isReady = false;
 app.get("/health", (_req, res) => {
   res.status(200).json({
     status: isReady ? "ok" : "starting",
-    service: "zarshan-backend",
+    service: "smindruk-backend",
     ready: isReady,
   });
 });
 
 app.get("/", (_req, res) => {
-  res.status(200).json({ status: "ok", service: "zarshan-backend" });
+  res.status(200).json({ status: "ok", service: "smindruk-backend" });
 });
 
 const server = app.listen(PORT, "0.0.0.0", () => {
-  logger.info(`Zarshan backend listening on port ${PORT}`);
+  logger.info(`Smindruk backend listening on port ${PORT}`);
   logger.info(`Health check: http://0.0.0.0:${PORT}/health`);
   if (process.env.RAILWAY_PUBLIC_DOMAIN) {
     logger.info(`Railway public URL: https://${process.env.RAILWAY_PUBLIC_DOMAIN}`);

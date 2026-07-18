@@ -26,7 +26,7 @@ const updateProfile = asyncHandler(async (req, res) => {
 const uploadAvatar = asyncHandler(async (req, res) => {
   if (!req.file) throw ApiError.badRequest("No avatar file was uploaded.");
 
-  const result = await uploadToCloudinary(req.file.path, "zarshan/avatars");
+  const result = await uploadToCloudinary(req.file.path, "smindruk/avatars");
 
   const user = await User.findByIdAndUpdate(req.user._id, { avatar: result.secure_url }, { new: true });
 

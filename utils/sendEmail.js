@@ -26,7 +26,7 @@ const sendEmail = async ({ to, subject, html }) => {
   try {
     const mailer = getTransporter();
     await mailer.sendMail({
-      from: process.env.EMAIL_FROM || "Zarshan <no-reply@zarshan.app>",
+      from: process.env.EMAIL_FROM || "Smindruk <no-reply@smindruk.app>",
       to,
       subject,
       html,

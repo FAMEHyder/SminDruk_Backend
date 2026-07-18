@@ -55,8 +55,8 @@ const register = asyncHandler(async (req, res) => {
     try {
       await sendEmail({
         to: user.email,
-        subject: "Verify your Zarshan account",
-        html: `<p>Welcome to Zarshan! Your verification code is: <b>${verificationCode}</b></p>`,
+        subject: "Verify your Smindruk account",
+        html: `<p>Welcome to Smindruk! Your verification code is: <b>${verificationCode}</b></p>`,
       });
       emailSent = true;
     } catch (error) {
@@ -92,7 +92,7 @@ const resendVerification = asyncHandler(async (req, res) => {
     try {
       await sendEmail({
         to: user.email,
-        subject: "Your new Zarshan verification code",
+        subject: "Your new Smindruk verification code",
         html: `<p>Your new verification code is: <b>${verificationCode}</b></p>`,
       });
       emailSent = true;
@@ -192,7 +192,7 @@ const forgotPassword = asyncHandler(async (req, res) => {
     try {
       await sendEmail({
         to: user.email,
-        subject: "Reset your Zarshan password",
+        subject: "Reset your Smindruk password",
         html: `<p>Click <a href="${resetUrl}">here</a> to reset your password. This link expires in 1 hour.</p>`,
       });
       emailSent = true;

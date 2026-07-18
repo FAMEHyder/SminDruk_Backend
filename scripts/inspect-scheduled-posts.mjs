@@ -3,7 +3,7 @@ import "dotenv/config";
 import Post from "../models/post.model.js";
 import { getMongoUrl } from "../utils/env.js";
 
-await mongoose.connect(getMongoUrl(), { dbName: process.env.MONGO_DB_NAME || "zarshan" });
+await mongoose.connect(getMongoUrl(), { dbName: process.env.MONGO_DB_NAME || "smindruk" });
 
 const now = new Date();
 const scheduled = await Post.find({ status: "scheduled" }).sort({ scheduledAt: -1 }).limit(10);

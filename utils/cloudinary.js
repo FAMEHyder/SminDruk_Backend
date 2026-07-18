@@ -12,9 +12,9 @@ cloudinary.config({
  * Uploads a local file (saved by Multer in /media/uploads) to Cloudinary
  * and removes the local temp file afterwards.
  * @param {string} localFilePath
- * @param {string} folder Cloudinary folder, e.g. "zarshan/posts"
+ * @param {string} folder Cloudinary folder, e.g. "smindruk/posts"
  */
-const uploadToCloudinary = async (localFilePath, folder = "zarshan") => {
+const uploadToCloudinary = async (localFilePath, folder = "smindruk") => {
   try {
     const response = await cloudinary.uploader.upload(localFilePath, {
       folder,

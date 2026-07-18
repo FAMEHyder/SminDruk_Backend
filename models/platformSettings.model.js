@@ -3,7 +3,7 @@ import mongoose from "mongoose";
 const platformSettingsSchema = new mongoose.Schema(
   {
     key: { type: String, required: true, unique: true, default: "default" },
-    websiteName: { type: String, default: "Zarshan" },
+    websiteName: { type: String, default: "Smindruk" },
     logo: { type: String, default: "" },
     favicon: { type: String, default: "" },
     contactEmail: { type: String, default: "" },

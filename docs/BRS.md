@@ -2,7 +2,7 @@
 
 # Backend Requirements Specification (BRS v1.0)
 
-> Project codename: **Zarshan Backend** (product name: **SocialFlow**)
+> Project codename: **Smindruk Backend** (product name: **SocialFlow**)
 > This document defines the backend requirements only. It contains **no real
 > secrets** — every credential is referenced by its environment variable name.
 > Actual values live in a local `.env` file (never committed to git); see
@@ -77,7 +77,7 @@ The project intentionally uses a **flat, simplified structure** (as
 requested), instead of nesting everything under `src/`:
 
 ```text
-zarshan-backend/
+smindruk-backend/
 │
 ├── index.js              # App entry point (Express app + server bootstrap)
 ├── config/                # Environment-driven configuration

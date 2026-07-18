@@ -5,9 +5,9 @@ const swaggerSpec = swaggerJsdoc({
   definition: {
     openapi: "3.0.0",
     info: {
-      title: "Zarshan Backend API",
+      title: "Smindruk Backend API",
       version: "1.0.0",
-      description: "REST API documentation for SocialFlow — the Zarshan Social Media Management SaaS backend.",
+      description: "REST API documentation for SocialFlow — the Smindruk Social Media Management SaaS backend.",
     },
     servers: [
       { url: getApiUrl(), description: "Current environment" },

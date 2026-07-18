@@ -1,7 +1,7 @@
 {
-  "name": "zarshan-backend",
+  "name": "smindruk-backend",
   "version": "1.0.0",
-  "description": "SocialFlow - Social Media Management SaaS Backend (Zarshan Backend API)",
+  "description": "SocialFlow - Social Media Management SaaS Backend (Smindruk Backend API)",
   "main": "index.js",
   "type": "module",
   "engines": {
@@ -18,7 +18,7 @@
     "express",
     "mongodb"
   ],
-  "author": "Zarshan",
+  "author": "Smindruk",
   "license": "ISC",
   "dependencies": {
     "axios": "^1.18.1",

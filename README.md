@@ -1,6 +1,6 @@
-# Zarshan Backend (SocialFlow API)
+# Smindruk Backend (SocialFlow API)
 
-REST API backend for **Zarshan**, a Social Media Management SaaS. Built with
+REST API backend for **Smindruk**, a Social Media Management SaaS. Built with
 Node.js, Express.js, and MongoDB (Mongoose). See
 [`docs/BRS.md`](./docs/BRS.md) for the full Backend Requirements
 Specification.
@@ -43,7 +43,7 @@ The API will be available at `http://localhost:5000` (or your configured
 ## Folder Structure
 
 ```text
-zarshan-backend/
+smindruk-backend/
 ├── index.js              # Entry point: Express app + server bootstrap
 ├── config/                 # db.js (MongoDB), passport.js (OAuth), swagger.js
 ├── routes/                 # One Express router per module

@@ -95,7 +95,7 @@ const inviteMember = asyncHandler(async (req, res) => {
 
   const invitedUser = await User.findOne({ email });
   if (!invitedUser) {
-    throw ApiError.notFound("No Zarshan account found for this email. Ask them to sign up first.");
+    throw ApiError.notFound("No Smindruk account found for this email. Ask them to sign up first.");
   }
 
   const existing = await TeamMember.findOne({ workspace: req.params.id, user: invitedUser._id });
