@@ -18,7 +18,7 @@ const DEFAULT_LOCAL_API = "http://localhost:8000";
 const DEFAULT_LIVE_API = "https://smindruk.up.railway.app";
 const DEFAULT_LOCAL_FRONTEND = "http://localhost:3000";
 const DEFAULT_LIVE_FRONTEND = "https://smindruk.vercel.app";
-const DASHBOARD_URL = "https://dashboard-smindruk.vercel.app/"
+const DEFAULT_LIVE_ADMIN = "https://dashboard-smindruk.vercel.app";
 
 const parseList = (value) =>
   value
@@ -91,12 +91,13 @@ const getAllowedOrigins = () =>
       ...parseList(process.env.ALLOWED_ORIGINS),
       getLocalFrontendUrl(),
       getLiveFrontendUrl(),
+      getEnv("ADMIN_FRONTEND_URL_LIVE", "ADMIN_FRONTEND_URL"),
+      DEFAULT_LIVE_ADMIN,
       "http://localhost:3000",
       "http://localhost:3001",
       "http://127.0.0.1:3000",
       "http://127.0.0.1:3001",
       DEFAULT_LIVE_FRONTEND,
-      DASHBOARD_URL,
     ].filter(Boolean)
   );
 
