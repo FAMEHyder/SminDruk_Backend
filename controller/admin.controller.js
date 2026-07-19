@@ -20,6 +20,7 @@ import Notification from "../models/notification.model.js";
 import Analytics from "../models/analytics.model.js";
 import RefreshToken from "../models/refreshToken.model.js";
 import PlatformSettings from "../models/platformSettings.model.js";
+import TeamMember from "../models/teamMember.model.js";
 import { deleteFromCloudinary } from "../utils/cloudinary.js";
 import {
   formatTokenRefreshMeta,
@@ -266,9 +267,55 @@ const deleteUser = asyncHandler(async (req, res) => {
   const user = await User.findById(req.params.id);
   if (!user) throw ApiError.notFound("User not found.");
   if (user.role === "superadmin") throw ApiError.forbidden("Cannot delete a superadmin.");
-  await User.findByIdAndDelete(req.params.id);
-  await RefreshToken.deleteMany({ user: req.params.id });
-  await logAdminAction(req, `User deleted: ${user.email}`, { userId: user._id });
+
+  const userId = user._id;
+  const workspaces = await Workspace.find({ owner: userId }).select("_id");
+  const workspaceIds = workspaces.map((w) => w._id);
+
+  if (workspaceIds.length) {
+    const mediaItems = await Media.find({ workspace: { $in: workspaceIds } }).select("publicId");
+    for (const item of mediaItems) {
+      if (item.publicId) {
+        try {
+          await deleteFromCloudinary(item.publicId);
+        } catch {
+          // best-effort cleanup
+        }
+      }
+    }
+
+    await Promise.all([
+      SocialAccount.deleteMany({ workspace: { $in: workspaceIds } }),
+      ConnectedPage.deleteMany({ workspace: { $in: workspaceIds } }),
+      Post.deleteMany({ workspace: { $in: workspaceIds } }),
+      BulkPost.deleteMany({ workspace: { $in: workspaceIds } }),
+      PagePost.deleteMany({ workspace: { $in: workspaceIds } }),
+      Media.deleteMany({ workspace: { $in: workspaceIds } }),
+      Analytics.deleteMany({ workspace: { $in: workspaceIds } }),
+      Payment.deleteMany({ workspace: { $in: workspaceIds } }),
+      Subscription.deleteMany({ workspace: { $in: workspaceIds } }),
+      TeamMember.deleteMany({ workspace: { $in: workspaceIds } }),
+      Workspace.deleteMany({ _id: { $in: workspaceIds } }),
+    ]);
+  }
+
+  await Promise.all([
+    TeamMember.deleteMany({ user: userId }),
+    Notification.deleteMany({ user: userId }),
+    RefreshToken.deleteMany({ user: userId }),
+    SocialAccount.deleteMany({ connectedBy: userId }),
+    ConnectedPage.deleteMany({ connectedBy: userId }),
+    Post.deleteMany({ createdBy: userId }),
+    BulkPost.deleteMany({ createdBy: userId }),
+    Blog.deleteMany({ author: userId }),
+    AuditLog.deleteMany({ user: userId }),
+  ]);
+
+  await User.findByIdAndDelete(userId);
+  await logAdminAction(req, `User deleted (cascade): ${user.email}`, {
+    userId,
+    workspacesDeleted: workspaceIds.length,
+  });
   return new ApiResponse(200, "User deleted successfully.").send(res);
 });
 

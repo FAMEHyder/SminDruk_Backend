@@ -122,6 +122,32 @@ const facebookConnectCallback = asyncHandler(async (req, res) => {
     const tokenIssuedAt = new Date();
     const tokenExpiresAt = new Date(Date.now() + FB_PAGE_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
 
+    // Always save as manage SocialAccounts so the user can post to their own pages.
+    for (const page of pages) {
+      await SocialAccount.findOneAndUpdate(
+        { workspace: workspaceId, platform: "facebook", accountId: page.id },
+        {
+          workspace: workspaceId,
+          connectedBy: userId,
+          platform: "facebook",
+          accountId: page.id,
+          accountName: page.name,
+          category: page.category || "",
+          avatar: page.picture?.data?.url || "",
+          accessToken: encrypt(page.access_token),
+          userAccessToken: encrypt(longUserToken),
+          tokenIssuedAt,
+          tokenExpiresAt,
+          status: "connected",
+          lastSyncedAt: new Date(),
+          lastTokenRefreshAttemptAt: null,
+          lastTokenRefreshError: null,
+        },
+        { upsert: true, new: true }
+      );
+    }
+
+    // Dataset mode also adds pages to the trending ConnectedPage collection for bulk post.
     if (connectMode === "trending") {
       const pageNumbers = await getNextPageNumbers(pages);
 
@@ -151,30 +177,6 @@ const facebookConnectCallback = asyncHandler(async (req, res) => {
       }
 
       return res.redirect(`${frontendUrl}/dashboard/connect-channels?fb=connected&mode=trending`);
-    }
-
-    for (const page of pages) {
-      await SocialAccount.findOneAndUpdate(
-        { workspace: workspaceId, platform: "facebook", accountId: page.id },
-        {
-          workspace: workspaceId,
-          connectedBy: userId,
-          platform: "facebook",
-          accountId: page.id,
-          accountName: page.name,
-          category: page.category || "",
-          avatar: page.picture?.data?.url || "",
-          accessToken: encrypt(page.access_token),
-          userAccessToken: encrypt(longUserToken),
-          tokenIssuedAt,
-          tokenExpiresAt,
-          status: "connected",
-          lastSyncedAt: new Date(),
-          lastTokenRefreshAttemptAt: null,
-          lastTokenRefreshError: null,
-        },
-        { upsert: true, new: true }
-      );
     }
 
     return res.redirect(`${frontendUrl}/dashboard/connect-channels?fb=connected&mode=manage`);
