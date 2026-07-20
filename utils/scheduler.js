@@ -6,18 +6,20 @@ import { executePublish } from "./publishPost.js";
 import { executeBulkPublish } from "./bulkFacebookPublish.js";
 import { runFacebookTokenRefreshJob } from "./facebookTokenRefresh.js";
 import logger from "./logger.js";
-const MAX_RETRY_ATTEMPTS = 3;
+
 const STUCK_PUBLISHING_MS = 10 * 60 * 1000;
+/** Notify on first failure, then every N retries (avoid spam while never giving up). */
+const FAILURE_NOTIFY_EVERY = 10;
 
 /**
  * Atomically claims one due post so multiple scheduler ticks cannot publish twice.
+ * Scheduled posts are never abandoned — no retry cap.
  */
 const claimDuePost = async (postId, now, staleCutoff) => {
   return Post.findOneAndUpdate(
     {
       _id: postId,
       scheduledAt: { $lte: now, $ne: null },
-      retryCount: { $lt: MAX_RETRY_ATTEMPTS },
       $or: [{ status: "scheduled" }, { status: "publishing", updatedAt: { $lte: staleCutoff } }],
     },
     { $set: { status: "publishing" } },
@@ -26,15 +28,38 @@ const claimDuePost = async (postId, now, staleCutoff) => {
 };
 
 /**
+ * Re-queue previously failed scheduled posts so they publish after fixes
+ * (e.g. token decrypt key mismatch) instead of staying failed forever.
+ */
+const requeueFailedScheduledPosts = async () => {
+  const result = await Post.updateMany(
+    {
+      status: "failed",
+      scheduledAt: { $ne: null },
+    },
+    {
+      $set: { status: "scheduled", retryCount: 0 },
+      $unset: { failureReason: 1 },
+    }
+  );
+
+  if (result.modifiedCount > 0) {
+    logger.info(`Re-queued ${result.modifiedCount} failed scheduled post(s) for retry.`);
+  }
+};
+
+/**
  * Finds posts whose scheduled time has passed and publishes them to connected platforms.
+ * On error: keeps status "scheduled" and retries next minute — never marks failed permanently.
  */
 const runScheduledPostsJob = async () => {
+  await requeueFailedScheduledPosts();
+
   const now = new Date();
   const staleCutoff = new Date(Date.now() - STUCK_PUBLISHING_MS);
 
   const candidates = await Post.find({
     scheduledAt: { $lte: now, $ne: null },
-    retryCount: { $lt: MAX_RETRY_ATTEMPTS },
     $or: [{ status: "scheduled" }, { status: "publishing", updatedAt: { $lte: staleCutoff } }],
   })
     .select("_id scheduledAt status")
@@ -70,41 +95,57 @@ const runScheduledPostsJob = async () => {
       logger.info(`Scheduled post ${post._id} published successfully.`);
     } catch (error) {
       const nextRetryCount = (post.retryCount || 0) + 1;
-      const nextStatus = nextRetryCount >= MAX_RETRY_ATTEMPTS ? "failed" : "scheduled";
 
+      // Never mark scheduled posts as failed — keep retrying every minute.
       await Post.findByIdAndUpdate(post._id, {
         $set: {
-          status: nextStatus,
+          status: "scheduled",
           failureReason: error.message,
         },
         $inc: { retryCount: 1 },
       });
 
-      await Notification.create({
-        user: post.createdBy,
-        type: "publish_failed",
-        title: "Scheduled post failed",
-        message: error.message,
-        metadata: { postId: post._id },
-      }).catch((notifyError) => logger.warn(`Could not create failure notification: ${notifyError.message}`));
+      if (nextRetryCount === 1 || nextRetryCount % FAILURE_NOTIFY_EVERY === 0) {
+        await Notification.create({
+          user: post.createdBy,
+          type: "publish_failed",
+          title: "Scheduled post retrying",
+          message: `Publish attempt failed (${error.message}). Will keep retrying automatically.`,
+          metadata: { postId: post._id, retryCount: nextRetryCount },
+        }).catch((notifyError) =>
+          logger.warn(`Could not create failure notification: ${notifyError.message}`)
+        );
+      }
 
-      logger.error(`Failed to publish scheduled post ${post._id}: ${error.message}`);
+      logger.error(`Failed to publish scheduled post ${post._id} (retry ${nextRetryCount}): ${error.message}`);
     }
   }
 };
 
 /**
  * Publishes due bulk posts (trending dataset page-number range posts).
+ * On error: stays scheduled and retries — never permanent fail.
  */
 const runScheduledBulkPostsJob = async () => {
   const now = new Date();
 
+  await BulkPost.updateMany(
+    { status: "failed", scheduledAt: { $ne: null } },
+    { $set: { status: "scheduled" }, $unset: { failureReason: 1 } }
+  );
+
   const dueBulkPosts = await BulkPost.find({
-    status: "scheduled",
+    status: { $in: ["scheduled", "publishing"] },
     scheduledAt: { $lte: now },
   }).sort({ scheduledAt: 1 });
 
   for (const bulkPost of dueBulkPosts) {
+    if (bulkPost.status === "publishing") {
+      // Skip fresh publishing locks; only reclaim if stuck > 10 min via updatedAt.
+      const ageMs = Date.now() - new Date(bulkPost.updatedAt).getTime();
+      if (ageMs < STUCK_PUBLISHING_MS) continue;
+    }
+
     bulkPost.status = "publishing";
     await bulkPost.save();
 
@@ -123,6 +164,7 @@ const runScheduledBulkPostsJob = async () => {
       bulkPost.status = "published";
       bulkPost.publishedCount = result.publishedCount;
       bulkPost.failedCount = result.failedCount;
+      bulkPost.failureReason = undefined;
       await bulkPost.save();
 
       await Notification.create({
@@ -135,17 +177,19 @@ const runScheduledBulkPostsJob = async () => {
 
       logger.info(`Scheduled bulk post ${bulkPost._id} published successfully.`);
     } catch (error) {
-      bulkPost.status = "failed";
+      bulkPost.status = "scheduled";
       bulkPost.failureReason = error.message;
       await bulkPost.save();
 
       await Notification.create({
         user: bulkPost.createdBy,
         type: "publish_failed",
-        title: "Scheduled bulk post failed",
-        message: error.message,
+        title: "Scheduled bulk post retrying",
+        message: `Publish attempt failed (${error.message}). Will keep retrying automatically.`,
         metadata: { bulkPostId: bulkPost._id, secretKey: bulkPost.secretKey },
-      }).catch((notifyError) => logger.warn(`Could not create bulk failure notification: ${notifyError.message}`));
+      }).catch((notifyError) =>
+        logger.warn(`Could not create bulk failure notification: ${notifyError.message}`)
+      );
 
       logger.error(`Failed to publish scheduled bulk post ${bulkPost._id}: ${error.message}`);
     }

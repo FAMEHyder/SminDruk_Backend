@@ -96,7 +96,8 @@ const resolvePublishableFacebookAccounts = async (post, accountIds) => {
  * Publishes a workspace post to the selected Facebook Page social accounts.
  */
 const publishPostToFacebookPages = async (post) => {
-  const accountIds = post.socialAccounts?.map(String) || [];
+  const accountIds =
+    post.socialAccounts?.map((id) => String(id?._id || id)).filter(Boolean) || [];
   if (!accountIds.length) {
     throw new Error("No Facebook pages selected for this post.");
   }

@@ -11,6 +11,11 @@ const executePublish = async (post) => {
 
   const failures = [];
 
+  // Ensure Map exists even if document was loaded oddly.
+  if (!post.platformPostIds || typeof post.platformPostIds.set !== "function") {
+    post.platformPostIds = new Map();
+  }
+
   if (post.platforms.includes("facebook")) {
     const { results } = await publishPostToFacebookPages(post);
 
@@ -32,7 +37,8 @@ const executePublish = async (post) => {
     failures.push(`Not yet supported: ${unsupported.join(", ")}`);
   }
 
-  post.status = failures.length && !post.platformPostIds.size ? "failed" : "published";
+  const publishedIds = post.platformPostIds?.size || 0;
+  post.status = failures.length && !publishedIds ? "failed" : "published";
   post.publishedAt = new Date();
   post.failureReason = failures.length ? failures.join("; ") : undefined;
   await post.save();
