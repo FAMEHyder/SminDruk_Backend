@@ -139,7 +139,7 @@ const getDashboardOverview = asyncHandler(async (_req, res) => {
     User.countDocuments({ isActive: true }),
     User.countDocuments({ createdAt: { $gte: todayStart } }),
     Workspace.countDocuments(),
-    SocialAccount.countDocuments({ status: "connected" }),
+    SocialAccount.countDocuments({ status: "connected", connectSource: { $ne: "dataset" } }),
     ConnectedPage.countDocuments({ status: "connected" }),
     Post.countDocuments(),
     Post.countDocuments({ status: "scheduled" }),
@@ -156,7 +156,11 @@ const getDashboardOverview = asyncHandler(async (_req, res) => {
   ]);
 
   const [manageAccountsList, datasetPagesList] = await Promise.all([
-    SocialAccount.find({ platform: "facebook", status: "connected" }).select("tokenIssuedAt createdAt"),
+    SocialAccount.find({
+      platform: "facebook",
+      status: "connected",
+      connectSource: { $ne: "dataset" },
+    }).select("tokenIssuedAt createdAt"),
     ConnectedPage.find({ status: "connected" }).select("tokenIssuedAt createdAt"),
   ]);
 
@@ -393,7 +397,7 @@ const manageWorkspaces = asyncHandler(async (req, res) => {
     items.map(async (ws) => {
       const [posts, accounts, pages] = await Promise.all([
         Post.countDocuments({ workspace: ws._id }),
-        SocialAccount.countDocuments({ workspace: ws._id }),
+        SocialAccount.countDocuments({ workspace: ws._id, connectSource: { $ne: "dataset" } }),
         ConnectedPage.countDocuments({ workspace: ws._id }),
       ]);
       return { ...ws.toObject(), stats: { posts, accounts, pages } };
@@ -572,7 +576,8 @@ const deletePostAdmin = asyncHandler(async (req, res) => {
 const getSocialAccountsOverview = asyncHandler(async (req, res) => {
   const { search, status } = req.query;
 
-  const manageFilter = { platform: "facebook" };
+  // Manage = SocialAccounts connected via "manage" only (dataset dual-write excluded)
+  const manageFilter = { platform: "facebook", connectSource: { $ne: "dataset" } };
   const datasetFilter = {};
 
   if (status) {
@@ -1124,7 +1129,7 @@ const getPlatformReports = asyncHandler(async (_req, res) => {
     Payment.aggregate([{ $match: { status: "succeeded" } }, { $group: { _id: null, total: { $sum: "$amount" } } }]),
     Payment.countDocuments({ status: "failed" }),
     Subscription.countDocuments({ status: "active" }),
-    SocialAccount.countDocuments({ status: "connected" }),
+    SocialAccount.countDocuments({ status: "connected", connectSource: { $ne: "dataset" } }),
     ConnectedPage.countDocuments({ status: "connected" }),
     ContactMessage.countDocuments({ status: { $ne: "resolved" } }),
     Blog.countDocuments({ status: "published" }),

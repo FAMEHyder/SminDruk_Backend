@@ -41,6 +41,18 @@ const socialAccountSchema = new mongoose.Schema(
       enum: ["connected", "disconnected", "expired", "error"],
       default: "connected",
     },
+    /**
+     * How this account was connected:
+     * - manage  → counts in admin "Manage" list
+     * - dataset → also has ConnectedPage; used for Create Post/schedule for the owner,
+     *             but must NOT count as a manage account in admin
+     */
+    connectSource: {
+      type: String,
+      enum: ["manage", "dataset"],
+      default: "manage",
+      index: true,
+    },
     lastSyncedAt: { type: Date },
   },
   { timestamps: true }

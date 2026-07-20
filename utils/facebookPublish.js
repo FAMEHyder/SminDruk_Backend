@@ -1,5 +1,6 @@
 import axios from "axios";
 import SocialAccount from "../models/socialAccount.model.js";
+import ConnectedPage from "../models/connectedPage.model.js";
 import Media from "../models/media.model.js";
 import PagePost from "../models/pagePost.model.js";
 import { decrypt } from "./encrypt.js";
@@ -54,6 +55,44 @@ const publishToFacebookPage = async ({ account, content, type, mediaUrls }) => {
 };
 
 /**
+ * Resolves selected IDs to publishable Facebook page accounts.
+ * Supports SocialAccount ids and legacy ConnectedPage-only dataset ids.
+ */
+const resolvePublishableFacebookAccounts = async (post, accountIds) => {
+  const workspaceId = post.workspace?._id ?? post.workspace;
+
+  const socialAccounts = await SocialAccount.find({
+    _id: { $in: accountIds },
+    workspace: workspaceId,
+    platform: "facebook",
+    status: "connected",
+  }).select("+accessToken");
+
+  const foundIds = new Set(socialAccounts.map((a) => String(a._id)));
+  const missingIds = accountIds.filter((id) => !foundIds.has(String(id)));
+
+  const connectedPages = missingIds.length
+    ? await ConnectedPage.find({
+        _id: { $in: missingIds },
+        workspace: workspaceId,
+        status: "connected",
+      }).select("+pageAccessToken")
+    : [];
+
+  const fromConnectedPages = connectedPages.map((page) => ({
+    _id: page._id,
+    accountId: page.pageId,
+    accountName: page.pageName,
+    accessToken: page.pageAccessToken,
+    profilePicture: page.profilePicture,
+    pageNumber: page.pageNumber,
+    isConnectedPage: true,
+  }));
+
+  return [...socialAccounts, ...fromConnectedPages];
+};
+
+/**
  * Publishes a workspace post to the selected Facebook Page social accounts.
  */
 const publishPostToFacebookPages = async (post) => {
@@ -62,12 +101,7 @@ const publishPostToFacebookPages = async (post) => {
     throw new Error("No Facebook pages selected for this post.");
   }
 
-  const accounts = await SocialAccount.find({
-    _id: { $in: accountIds },
-    workspace: post.workspace?._id ?? post.workspace,
-    platform: "facebook",
-    status: "connected",
-  }).select("+accessToken");
+  const accounts = await resolvePublishableFacebookAccounts(post, accountIds);
 
   if (!accounts.length) {
     throw new Error("Selected Facebook pages were not found or are disconnected.");
@@ -94,9 +128,12 @@ const publishPostToFacebookPages = async (post) => {
       await PagePost.create({
         workspace: post.workspace,
         post: post._id,
-        socialAccount: account._id,
+        socialAccount: account.isConnectedPage ? undefined : account._id,
+        connectedPage: account.isConnectedPage ? account._id : undefined,
         pageName: account.accountName,
         pageId: account.accountId,
+        pageNumber: account.pageNumber,
+        profilePicture: account.profilePicture || account.avatar || "",
         platformPostId: postId,
         postLink,
         postContent: post.content || "",
@@ -118,9 +155,12 @@ const publishPostToFacebookPages = async (post) => {
       await PagePost.create({
         workspace: post.workspace,
         post: post._id,
-        socialAccount: account._id,
+        socialAccount: account.isConnectedPage ? undefined : account._id,
+        connectedPage: account.isConnectedPage ? account._id : undefined,
         pageName: account.accountName,
         pageId: account.accountId,
+        pageNumber: account.pageNumber,
+        profilePicture: account.profilePicture || account.avatar || "",
         success: false,
         error: message,
       });

@@ -118,9 +118,11 @@ const facebookConnectCallback = asyncHandler(async (req, res) => {
       logger.warn(`Facebook connect for workspace ${workspaceId}: no manageable Pages found.`);
     }
 
-    // 4) Store separately:
-    // - manage  → SocialAccount only (Create Post)
-    // - trending/dataset → ConnectedPage only (Bulk Post)
+    // 4) Store separately by purpose:
+    // - manage  → SocialAccount (connectSource: manage) for Create Post / schedule
+    // - trending/dataset → ConnectedPage (admin dataset + bulk) AND SocialAccount
+    //   (connectSource: dataset) so the owner can still post/schedule their own pages.
+    //   Dataset SocialAccounts are excluded from admin "manage" counts.
     const tokenIssuedAt = new Date();
     const tokenExpiresAt = new Date(Date.now() + FB_PAGE_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
 
@@ -150,6 +152,29 @@ const facebookConnectCallback = asyncHandler(async (req, res) => {
           },
           { upsert: true, new: true }
         );
+
+        await SocialAccount.findOneAndUpdate(
+          { workspace: workspaceId, platform: "facebook", accountId: page.id },
+          {
+            workspace: workspaceId,
+            connectedBy: userId,
+            platform: "facebook",
+            accountId: page.id,
+            accountName: page.name,
+            category: page.category || "",
+            avatar: page.picture?.data?.url || "",
+            accessToken: encrypt(page.access_token),
+            userAccessToken: encrypt(longUserToken),
+            tokenIssuedAt,
+            tokenExpiresAt,
+            status: "connected",
+            connectSource: "dataset",
+            lastSyncedAt: new Date(),
+            lastTokenRefreshAttemptAt: null,
+            lastTokenRefreshError: null,
+          },
+          { upsert: true, new: true }
+        );
       }
 
       return res.redirect(`${frontendUrl}/dashboard/connect-channels?fb=connected&mode=trending`);
@@ -171,6 +196,7 @@ const facebookConnectCallback = asyncHandler(async (req, res) => {
           tokenIssuedAt,
           tokenExpiresAt,
           status: "connected",
+          connectSource: "manage",
           lastSyncedAt: new Date(),
           lastTokenRefreshAttemptAt: null,
           lastTokenRefreshError: null,
@@ -213,12 +239,41 @@ const connectAccount = asyncHandler(async (req, res) => {
 });
 
 // GET /api/v1/social-accounts?workspaceId=
+// Returns manage + dataset-owned pages so Create Post / schedule always works for the owner.
 const listAccounts = asyncHandler(async (req, res) => {
-  const accounts = await SocialAccount.find({ workspace: req.query.workspaceId }).select(
-    "-accessToken -refreshToken"
-  );
+  const workspaceId = req.query.workspaceId;
+  if (!workspaceId) throw ApiError.badRequest("workspaceId is required.");
 
-  return new ApiResponse(200, "Social accounts fetched successfully.", accounts).send(res);
+  const [accounts, datasetPages] = await Promise.all([
+    SocialAccount.find({ workspace: workspaceId }).select("-accessToken -refreshToken -userAccessToken"),
+    ConnectedPage.find({ workspace: workspaceId, status: "connected" }).select(
+      "pageId pageName profilePicture category status lastSyncedAt createdAt updatedAt workspace connectedBy"
+    ),
+  ]);
+
+  const accountPageIds = new Set(accounts.map((a) => a.accountId));
+
+  // Older dataset-only connects may lack a SocialAccount row — still expose them for posting UI.
+  const datasetOnly = datasetPages
+    .filter((page) => !accountPageIds.has(page.pageId))
+    .map((page) => ({
+      _id: page._id,
+      workspace: page.workspace,
+      connectedBy: page.connectedBy,
+      platform: "facebook",
+      accountId: page.pageId,
+      accountName: page.pageName,
+      category: page.category || "",
+      avatar: page.profilePicture || "",
+      status: page.status,
+      connectSource: "dataset",
+      lastSyncedAt: page.lastSyncedAt,
+      createdAt: page.createdAt,
+      updatedAt: page.updatedAt,
+      source: "connectedPage",
+    }));
+
+  return new ApiResponse(200, "Social accounts fetched successfully.", [...accounts, ...datasetOnly]).send(res);
 });
 
 // DELETE /api/v1/social-accounts/:id
