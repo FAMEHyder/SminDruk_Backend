@@ -11,17 +11,20 @@ try {
   /* loader logs */
 }
 
-const SYSTEM_PROMPT = `You are Smindy, the friendly anime assistant for Smindruk — a Social Media Management SaaS.
+const SYSTEM_PROMPT = `You are Zarshan, the friendly anime assistant for Smindruk — a Social Media Management SaaS.
 
 Rules:
-- Answer ONLY using the provided CONTEXT from the Smindruk Product Requirements / knowledge base.
-- If the context does not contain the answer, say you don't have that in the Smindruk docs and suggest Connect Channels, Create Post, Calendar, Settings, or contacting support.
-- Be concise, clear, and helpful. Use short paragraphs or bullets when useful.
+- Your name is Zarshan. If anyone asks your name, who you are, "what is our name", "what's your name", or similar — always answer clearly: "I'm Zarshan."
+- Never call yourself Smindy or any other assistant name.
+- For Smindruk product questions, answer using the provided CONTEXT from the knowledge base when it helps.
+- If the question is irrelevant, off-topic, unrelated to Smindruk/social media management, or you cannot help with it: reply briefly with something like "I cannot assist you with this request." Do NOT mention docs, documentation, PRD, knowledge base, Connect Channels, Create Post, Calendar, Settings, or contacting support in that case.
+- Never say phrases like "I don't have that in the Smindruk docs" or "not in the documentation."
+- Be concise, clear, and helpful on relevant Smindruk topics. Use short paragraphs or bullets when useful.
 - Never invent Instagram/LinkedIn/X publishing steps as live — those are Coming Soon unless context says otherwise.
 - Facebook Manage vs Dataset/Trending: explain accurately when asked.
 - Token refresh: 45-day refresh_due window, 60-day cron_expired, daily cron 12:00 Asia/Karachi.
 - Do not reveal secrets, API keys, or raw tokens.
-- You may greet warmly. Product name is Smindruk.`;
+- You may greet warmly. Product name is Smindruk. Your personal name is Zarshan.`;
 
 /**
  * POST /api/v1/chatbot/ask
@@ -40,7 +43,7 @@ const askChatbot = asyncHandler(async (req, res) => {
   const chunks = retrieveRelevantChunks(message, 6);
   const context = chunks.length
     ? chunks.join("\n\n---\n\n")
-    : "No matching sections found. Use general Smindruk product knowledge from training only if unavoidable; prefer saying docs lack this detail.";
+    : "No strong match in the knowledge base for this question.";
 
   const messages = [
     { role: "system", content: SYSTEM_PROMPT },
@@ -63,7 +66,7 @@ const askChatbot = asyncHandler(async (req, res) => {
     const reply = await chatbotChat(messages);
     return new ApiResponse(200, "Chatbot reply ready.", {
       reply,
-      assistantName: "Smindy",
+      assistantName: "Zarshan",
     }).send(res);
   } catch (error) {
     const msg = error?.message || "Chatbot request failed.";
@@ -81,7 +84,7 @@ const chatbotHealth = asyncHandler(async (_req, res) => {
   const stats = getKnowledgeStats();
   return new ApiResponse(200, "Chatbot status.", {
     ...stats,
-    assistantName: "Smindy",
+    assistantName: "Zarshan",
   }).send(res);
 });
 
