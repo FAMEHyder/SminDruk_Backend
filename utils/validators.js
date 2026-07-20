@@ -76,6 +76,19 @@ const aiValidators = {
   hashtags: z.object({
     prompt: z.string().min(3),
   }),
+  promptOnly: z.object({
+    prompt: z.string().min(3).optional(),
+    text: z.string().min(3).optional(),
+  }).refine((data) => Boolean(data.prompt?.trim() || data.text?.trim()), {
+    message: "prompt or text is required",
+  }),
+  improve: z.object({
+    text: z.string().min(3).optional(),
+    prompt: z.string().min(3).optional(),
+    tone: z.string().optional(),
+  }).refine((data) => Boolean(data.text?.trim() || data.prompt?.trim()), {
+    message: "text or prompt is required",
+  }),
   rewrite: z.object({
     text: z.string().min(3),
     tone: z.string().optional(),
