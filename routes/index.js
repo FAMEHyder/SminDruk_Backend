@@ -15,6 +15,7 @@ import __route_contact_routes from "./contact.routes.js";
 import __route_payment_routes from "./payment.routes.js";
 import __route_subscription_routes from "./subscription.routes.js";
 import __route_admin_routes from "./admin.routes.js";
+import __route_chatbot_routes from "./chatbot.routes.js";
 
 const router = express.Router();
 
@@ -34,5 +35,6 @@ router.use("/contact", __route_contact_routes);
 router.use("/payments", __route_payment_routes);
 router.use("/subscriptions", __route_subscription_routes);
 router.use("/admin", __route_admin_routes);
+router.use("/chatbot", __route_chatbot_routes);
 
 export default router;
