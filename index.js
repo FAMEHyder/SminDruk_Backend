@@ -5,7 +5,11 @@ import express from "express";
 import logger from "./utils/logger.js";
 
 // Always load Backend/.env from this file's directory (not process.cwd()).
-dotenv.config({ path: path.join(path.dirname(fileURLToPath(import.meta.url)), ".env") });
+// override: true so keys added/updated in .env (e.g. GROQ_API_KEY) actually apply.
+dotenv.config({
+  path: path.join(path.dirname(fileURLToPath(import.meta.url)), ".env"),
+  override: true,
+});
 
 const app = express();
 const PORT = Number(process.env.PORT) || 5000;

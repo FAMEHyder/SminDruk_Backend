@@ -931,9 +931,14 @@ const managePayments = asyncHandler(async (req, res) => {
 // ─── AI ──────────────────────────────────────────────────────
 
 const getAiOverview = asyncHandler(async (_req, res) => {
+  const configured = Boolean(
+    process.env.GROQ_API_KEY?.trim() ||
+      process.env.GROK_API_KEY?.trim() ||
+      process.env.OPENAI_API_KEY?.trim()
+  );
   return new ApiResponse(200, "AI overview fetched successfully.", {
-    configured: Boolean(process.env.OPENAI_API_KEY?.trim()),
-    provider: "openai",
+    configured,
+    provider: "groq",
     totalRequests: 0,
     tokensConsumed: 0,
     failedRequests: 0,
@@ -1184,7 +1189,7 @@ const getApiSettings = asyncHandler(async (_req, res) => {
       { name: "Facebook API", key: "FB_APP_ID", connected: check("FB_APP_ID") && check("FB_APP_SECRET") },
       { name: "Google OAuth", key: "GOOGLE_CLIENT_ID", connected: check("GOOGLE_CLIENT_ID") },
       { name: "GitHub OAuth", key: "GITHUB_CLIENT_ID", connected: check("GITHUB_CLIENT_ID") },
-      { name: "OpenAI", key: "OPENAI_API_KEY", connected: check("OPENAI_API_KEY") },
+      { name: "Groq AI", key: "GROQ_API_KEY", connected: check("GROQ_API_KEY") || check("GROK_API_KEY") || check("OPENAI_API_KEY") },
       {
         name: "Cloudinary",
         key: "CLOUDINARY",
