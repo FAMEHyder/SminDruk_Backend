@@ -1,5 +1,11 @@
+import path from "path";
+import { fileURLToPath } from "url";
+import dotenv from "dotenv";
 import OpenAI from "openai";
 import logger from "./logger.js";
+
+// Ensure Backend/.env is loaded even if this module is imported early.
+dotenv.config({ path: path.join(path.dirname(fileURLToPath(import.meta.url)), "..", ".env") });
 
 let client;
 
@@ -8,17 +14,18 @@ let client;
  * Uses GROQ_API_KEY from Backend/.env (OPENAI_API_KEY kept as fallback).
  */
 const getClient = () => {
-  if (!client) {
-    const apiKey = process.env.GROQ_API_KEY?.trim() || process.env.OPENAI_API_KEY?.trim();
-    if (!apiKey) {
-      logger.warn("GROQ_API_KEY is not set. AI features will return mock responses.");
-      return null;
-    }
-    client = new OpenAI({
-      apiKey,
-      baseURL: "https://api.groq.com/openai/v1",
-    });
+  if (client) return client;
+
+  const apiKey = process.env.GROQ_API_KEY?.trim() || process.env.OPENAI_API_KEY?.trim();
+  if (!apiKey) {
+    logger.error("GROQ_API_KEY is not set. Real AI generation requires a valid Groq key.");
+    return null;
   }
+
+  client = new OpenAI({
+    apiKey,
+    baseURL: "https://api.groq.com/openai/v1",
+  });
   return client;
 };
 
@@ -33,19 +40,29 @@ const generateCompletion = async (systemPrompt, userPrompt) => {
   const openai = getClient();
 
   if (!openai) {
-    return `[Mock AI response] ${userPrompt.slice(0, 120)}...`;
+    throw new Error("AI is not configured. Add GROQ_API_KEY to Backend/.env and restart the server.");
   }
 
-  const completion = await openai.chat.completions.create({
-    model: GROQ_MODEL,
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt },
-    ],
-    temperature: 0.8,
-  });
+  try {
+    const completion = await openai.chat.completions.create({
+      model: GROQ_MODEL,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      temperature: 0.8,
+    });
 
-  return completion.choices[0]?.message?.content?.trim() ?? "";
+    const text = completion.choices[0]?.message?.content?.trim() ?? "";
+    if (!text) {
+      throw new Error("AI returned an empty response. Please try again.");
+    }
+    return text;
+  } catch (error) {
+    const message = error?.error?.message || error?.message || "AI request failed.";
+    logger.error(`Groq AI error: ${message}`);
+    throw new Error(message);
+  }
 };
 
 export { generateCompletion };
