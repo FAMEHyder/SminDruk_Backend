@@ -27,7 +27,7 @@ Rules:
 - You may greet warmly. Product name is Smindruk. Your personal name is Zarshan.`;
 
 /**
- * POST /api/v1/chatbot/asknnn
+ * POST /api/v1/chatbot/ask
  * Public (landing + dashboard). Body: { message, history? }
  */
 const askChatbot = asyncHandler(async (req, res) => {

@@ -4,10 +4,20 @@ import { z } from "zod";
  * Central place for Zod request-validation schemas.
  * Used by middleware/validate.middleware.js via validate(schema).
  */
+const personNameSchema = z
+  .string()
+  .trim()
+  .min(1, "Name is required")
+  .max(50, "Name must be 50 characters or less")
+  .regex(/^[A-Za-z]+(?:[ '\-][A-Za-z]+)*$/, "Name can only contain letters (no numbers)")
+  .refine((value) => (value.match(/[A-Za-z]/g) || []).length > 3, {
+    message: "Name must be more than 3 letters",
+  });
+
 const authValidators = {
   register: z.object({
-    firstName: z.string().min(1, "First name is required"),
-    lastName: z.string().min(1, "Last name is required"),
+    firstName: personNameSchema,
+    lastName: personNameSchema,
     email: z.string().email("Invalid email address"),
     password: z.string().min(8, "Password must be at least 8 characters"),
   }),
