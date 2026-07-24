@@ -1,7 +1,9 @@
 import { generateCompletion } from "../utils/openai.js";
+import { generateAndSaveImage } from "../utils/huggingfaceImage.js";
 import asyncHandler from "../utils/asyncHandler.js";
 import ApiResponse from "../utils/apiResponse.js";
 import ApiError from "../utils/apiError.js";
+import GeneratedImage from "../models/generatedImage.model.js";
 
 const requirePrompt = (value, field = "prompt") => {
   const text = typeof value === "string" ? value.trim() : "";
@@ -44,6 +46,50 @@ const generateImagePrompt = asyncHandler(async (req, res) => {
   );
 
   return new ApiResponse(200, "Image prompt generated successfully.", { imagePrompt }).send(res);
+});
+
+// POST /api/v1/ai/generate-image — Hugging Face FLUX image generation
+const generateImage = asyncHandler(async (req, res) => {
+  const prompt = requirePrompt(req.body.prompt);
+
+  const result = await generateAndSaveImage(prompt);
+
+  const record = await GeneratedImage.create({
+    userId: req.user._id,
+    prompt,
+    imageUrl: result.imageUrl,
+    provider: result.provider,
+    model: result.model,
+  });
+
+  return new ApiResponse(200, "Image generated successfully.", {
+    imageUrl: record.imageUrl,
+    id: record._id,
+    model: record.model,
+    provider: record.provider,
+    createdAt: record.createdAt,
+  }).send(res);
+});
+
+// GET /api/v1/ai/history — previously generated images (newest first)
+const getImageHistory = asyncHandler(async (req, res) => {
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
+  const skip = (page - 1) * limit;
+
+  const filter = { userId: req.user._id };
+
+  const [items, total] = await Promise.all([
+    GeneratedImage.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+    GeneratedImage.countDocuments(filter),
+  ]);
+
+  return new ApiResponse(200, "Image generation history fetched successfully.", items, {
+    page,
+    limit,
+    total,
+    totalPages: Math.ceil(total / limit) || 0,
+  }).send(res);
 });
 
 // POST /api/v1/ai/content-calendar — AI Content Calendar
@@ -107,7 +153,6 @@ const generateSeoBlog = asyncHandler(async (req, res) => {
   return new ApiResponse(200, "SEO blog draft generated successfully.", { blog }).send(res);
 });
 
-// Existing helpers kept for compatibility
 const rewriteCaption = asyncHandler(async (req, res) => {
   const text = requirePrompt(req.body.text, "text");
   const { tone = "casual" } = req.body;
@@ -158,6 +203,8 @@ export {
   generateCaption,
   generateHashtags,
   generateImagePrompt,
+  generateImage,
+  getImageHistory,
   generateContentCalendar,
   improvePost,
   generateReply,

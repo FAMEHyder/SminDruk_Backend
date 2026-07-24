@@ -86,6 +86,14 @@ const aiValidators = {
   hashtags: z.object({
     prompt: z.string().min(3),
   }),
+  generateImage: z.object({
+    prompt: z
+      .string({ required_error: "prompt is required" })
+      .trim()
+      .min(1, "prompt cannot be empty")
+      .min(10, "prompt must be at least 10 characters")
+      .max(2000, "prompt must be 2000 characters or less"),
+  }),
   promptOnly: z.object({
     prompt: z.string().min(3).optional(),
     text: z.string().min(3).optional(),

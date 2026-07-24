@@ -11,6 +11,8 @@ router.use(authenticate);
 router.post("/caption", validate(aiValidators.caption), aiController.generateCaption);
 router.post("/hashtags", validate(aiValidators.hashtags), aiController.generateHashtags);
 router.post("/image-prompt", validate(aiValidators.promptOnly), aiController.generateImagePrompt);
+router.post("/generate-image", validate(aiValidators.generateImage), aiController.generateImage);
+router.get("/history", aiController.getImageHistory);
 router.post("/content-calendar", validate(aiValidators.promptOnly), aiController.generateContentCalendar);
 router.post("/improve", validate(aiValidators.improve), aiController.improvePost);
 router.post("/reply", validate(aiValidators.promptOnly), aiController.generateReply);

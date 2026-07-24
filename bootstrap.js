@@ -10,6 +10,7 @@ import {
   REQUIRED_ENV_VARS,
   RECOMMENDED_ENV_VARS,
 } from "./utils/env.js";
+import { getUploadsDir } from "./utils/huggingfaceImage.js";
 import express from "express";
 import helmet from "helmet";
 import cors from "cors";
@@ -71,6 +72,12 @@ const configureApp = (app) => {
   app.use(cookieParser());
   app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
   app.use(passport.initialize());
+
+  // Public PNG assets from AI image generation
+  app.use("/uploads", express.static(getUploadsDir(), {
+    fallthrough: true,
+    maxAge: "7d",
+  }));
 
   app.use("/api/v1/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
   app.use("/api/v1", routes);
