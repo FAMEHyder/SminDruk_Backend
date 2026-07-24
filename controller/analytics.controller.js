@@ -10,17 +10,16 @@ const recordMetrics = asyncHandler(async (req, res) => {
   return new ApiResponse(201, "Analytics recorded successfully.", record).send(res);
 });
 
-// GET /api/v1/analytics?workspaceId=&platform=&period=daily|weekly|monthly&from=&to=
+// GET /api/v1/analytics?workspaceId=&platform=&period=daily|weekly|monthly&from=&to=&sync=true
+// Returns MongoDB data immediately. Live Facebook sync is opt-in and never blocks the response.
 const getReport = asyncHandler(async (req, res) => {
   const { workspaceId, platform, period = "daily", from, to, sync } = req.query;
 
-  // Refresh live Facebook post metrics before building the report (default on).
-  if (workspaceId && sync !== "false") {
-    try {
-      await syncWorkspaceFacebookAnalytics(workspaceId);
-    } catch (error) {
+  if (workspaceId && (sync === "true" || sync === "1")) {
+    // Fire-and-forget so the client is not blocked on Graph API round-trips.
+    syncWorkspaceFacebookAnalytics(workspaceId).catch((error) => {
       logger.warn(`Analytics sync skipped: ${error.message}`);
-    }
+    });
   }
 
   const filter = { workspace: workspaceId, period };
@@ -31,12 +30,13 @@ const getReport = asyncHandler(async (req, res) => {
     if (to) filter.date.$lte = new Date(to);
   }
 
-  const records = await Analytics.find(filter).sort({ date: 1 });
+  const records = await Analytics.find(filter).sort({ date: 1 }).lean();
 
   const totals = records.reduce(
     (acc, r) => {
-      Object.entries(r.metrics.toObject()).forEach(([key, value]) => {
-        acc[key] = (acc[key] || 0) + value;
+      const metrics = r.metrics || {};
+      Object.entries(metrics).forEach(([key, value]) => {
+        acc[key] = (acc[key] || 0) + (value || 0);
       });
       return acc;
     },
@@ -49,11 +49,11 @@ const getReport = asyncHandler(async (req, res) => {
     if (!byPlatform[key]) {
       byPlatform[key] = { platform: key, likes: 0, comments: 0, shares: 0, reach: 0, impressions: 0 };
     }
-    byPlatform[key].likes += record.metrics.likes || 0;
-    byPlatform[key].comments += record.metrics.comments || 0;
-    byPlatform[key].shares += record.metrics.shares || 0;
-    byPlatform[key].reach += record.metrics.reach || 0;
-    byPlatform[key].impressions += record.metrics.impressions || 0;
+    byPlatform[key].likes += record.metrics?.likes || 0;
+    byPlatform[key].comments += record.metrics?.comments || 0;
+    byPlatform[key].shares += record.metrics?.shares || 0;
+    byPlatform[key].reach += record.metrics?.reach || 0;
+    byPlatform[key].impressions += record.metrics?.impressions || 0;
   }
 
   return new ApiResponse(200, "Analytics report generated successfully.", {

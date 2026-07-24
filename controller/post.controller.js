@@ -8,6 +8,8 @@ import ApiError from "../utils/apiError.js";
 
 import ApiResponse from "../utils/apiResponse.js";
 
+import mongoose from "mongoose";
+
 import Post from "../models/post.model.js";
 
 import PagePost from "../models/pagePost.model.js";
@@ -80,7 +82,9 @@ const listPosts = asyncHandler(async (req, res) => {
 
       .skip((Number(page) - 1) * Number(limit))
 
-      .limit(Number(limit)),
+      .limit(Number(limit))
+
+      .lean(),
 
     Post.countDocuments(filter),
 
@@ -109,12 +113,13 @@ const getPostStats = asyncHandler(async (req, res) => {
   const { workspaceId } = req.query;
   if (!workspaceId) throw ApiError.badRequest("workspaceId is required.");
 
-  const [total, published, scheduled, drafts, failed, liveLinks] = await Promise.all([
-    Post.countDocuments({ workspace: workspaceId }),
-    Post.countDocuments({ workspace: workspaceId, status: "published" }),
-    Post.countDocuments({ workspace: workspaceId, status: { $in: ["scheduled", "publishing"] } }),
-    Post.countDocuments({ workspace: workspaceId, status: "draft" }),
-    Post.countDocuments({ workspace: workspaceId, status: "failed" }),
+  const workspaceObjectId = new mongoose.Types.ObjectId(workspaceId);
+
+  const [statusRows, liveLinks] = await Promise.all([
+    Post.aggregate([
+      { $match: { workspace: workspaceObjectId } },
+      { $group: { _id: "$status", n: { $sum: 1 } } },
+    ]),
     PagePost.countDocuments({
       workspace: workspaceId,
       success: true,
@@ -122,12 +127,15 @@ const getPostStats = asyncHandler(async (req, res) => {
     }),
   ]);
 
+  const byStatus = Object.fromEntries(statusRows.map((row) => [row._id, row.n]));
+  const total = statusRows.reduce((sum, row) => sum + row.n, 0);
+
   return new ApiResponse(200, "Post stats fetched successfully.", {
     total,
-    published,
-    scheduled,
-    drafts,
-    failed,
+    published: byStatus.published || 0,
+    scheduled: (byStatus.scheduled || 0) + (byStatus.publishing || 0),
+    drafts: byStatus.draft || 0,
+    failed: byStatus.failed || 0,
     liveLinks,
   }).send(res);
 });
@@ -150,7 +158,8 @@ const listPagePostLinks = asyncHandler(async (req, res) => {
       .populate("post", "content type publishedAt status")
       .sort({ createdAt: -1 })
       .skip((Number(page) - 1) * Number(limit))
-      .limit(Number(limit)),
+      .limit(Math.min(Number(limit), 100))
+      .lean(),
     PagePost.countDocuments(filter),
   ]);
 
@@ -162,20 +171,40 @@ const listPagePostLinks = asyncHandler(async (req, res) => {
   }).send(res);
 });
 
-// GET /api/v1/posts/calendar?workspaceId=
+// GET /api/v1/posts/calendar?workspaceId=&from=&to=
 const listCalendarPosts = asyncHandler(async (req, res) => {
-  const { workspaceId } = req.query;
+  const { workspaceId, from, to } = req.query;
   if (!workspaceId) throw ApiError.badRequest("workspaceId is required.");
 
   const statuses = ["scheduled", "published", "failed", "publishing"];
 
+  // Default window: previous month → next two months (keeps month navigation usable).
+  const rangeStart = from
+    ? new Date(from)
+    : new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1);
+  const rangeEnd = to
+    ? new Date(to)
+    : new Date(new Date().getFullYear(), new Date().getMonth() + 3, 0, 23, 59, 59, 999);
+
+  const dateFilter = {
+    $or: [
+      { scheduledAt: { $gte: rangeStart, $lte: rangeEnd } },
+      { publishedAt: { $gte: rangeStart, $lte: rangeEnd } },
+      { scheduledAt: null, createdAt: { $gte: rangeStart, $lte: rangeEnd } },
+    ],
+  };
+
   const [posts, bulks] = await Promise.all([
-    Post.find({ workspace: workspaceId, status: { $in: statuses } })
-      .populate("media")
+    Post.find({ workspace: workspaceId, status: { $in: statuses }, ...dateFilter })
+      .populate("media", "url fileType mimeType")
+      .select("content type status scheduledAt publishedAt platforms workspace createdBy createdAt updatedAt")
       .sort({ scheduledAt: 1, publishedAt: 1 })
+      .limit(500)
       .lean(),
-    BulkPost.find({ workspace: workspaceId, status: { $in: statuses } })
+    BulkPost.find({ workspace: workspaceId, status: { $in: statuses }, scheduledAt: { $gte: rangeStart, $lte: rangeEnd } })
+      .select("content postType status scheduledAt workspace createdBy failureReason createdAt updatedAt")
       .sort({ scheduledAt: 1 })
+      .limit(500)
       .lean(),
   ]);
 

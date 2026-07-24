@@ -22,5 +22,6 @@ const teamMemberSchema = new mongoose.Schema(
 );
 
 teamMemberSchema.index({ workspace: 1, user: 1 }, { unique: true });
+teamMemberSchema.index({ user: 1, status: 1 });
 
 export default mongoose.model("TeamMember", teamMemberSchema);

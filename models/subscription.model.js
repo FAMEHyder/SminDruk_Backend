@@ -40,4 +40,6 @@ const subscriptionSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+subscriptionSchema.index({ workspace: 1 });
+
 export default mongoose.model("Subscription", subscriptionSchema);

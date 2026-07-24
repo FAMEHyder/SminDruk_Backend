@@ -24,7 +24,10 @@ const connectDB = async () => {
     const dbName = process.env.MONGO_DB_NAME?.trim() || "smindruk";
     const conn = await mongoose.connect(mongoUrl, {
       dbName,
-      serverSelectionTimeoutMS: 30000,
+      maxPoolSize: 25,
+      minPoolSize: 2,
+      maxIdleTimeMS: 30000,
+      serverSelectionTimeoutMS: 10000,
     });
     logger.info(`MongoDB connected: ${conn.connection.host}/${conn.connection.name}`);
   } catch (error) {

@@ -29,5 +29,6 @@ const bulkPostSchema = new mongoose.Schema(
 );
 
 bulkPostSchema.index({ status: 1, scheduledAt: 1 });
+bulkPostSchema.index({ workspace: 1, status: 1, scheduledAt: 1 });
 
 export default mongoose.model("BulkPost", bulkPostSchema);

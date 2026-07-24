@@ -30,5 +30,6 @@ const analyticsSchema = new mongoose.Schema(
 );
 
 analyticsSchema.index({ workspace: 1, platform: 1, date: -1 });
+analyticsSchema.index({ workspace: 1, period: 1, platform: 1, date: 1 });
 
 export default mongoose.model("Analytics", analyticsSchema);

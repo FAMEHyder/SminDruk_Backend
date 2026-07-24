@@ -3,6 +3,30 @@ import ApiError from "../utils/apiError.js";
 import asyncHandler from "../utils/asyncHandler.js";
 import User from "../models/user.model.js";
 
+/** Short-lived in-memory cache so every authenticated request does not hit Mongo. */
+const userCache = new Map();
+const USER_CACHE_TTL_MS = 30_000;
+
+async function getCachedUser(userId) {
+  const hit = userCache.get(String(userId));
+  if (hit && Date.now() - hit.at < USER_CACHE_TTL_MS) {
+    return hit.user;
+  }
+
+  const user = await User.findById(userId).select("-password").lean();
+  if (user) {
+    userCache.set(String(userId), { user, at: Date.now() });
+  } else {
+    userCache.delete(String(userId));
+  }
+  return user;
+}
+
+/** Call after profile/role changes so the next request loads a fresh user. */
+export function invalidateAuthUserCache(userId) {
+  if (userId) userCache.delete(String(userId));
+}
+
 /**
  * Verifies the JWT access token from the Authorization header
  * (format: "Bearer <token>") and attaches the authenticated user to req.user.
@@ -22,7 +46,7 @@ const authenticate = asyncHandler(async (req, _res, next) => {
     throw ApiError.unauthorized("Access token is invalid or expired.");
   }
 
-  const user = await User.findById(decoded.id).select("-password");
+  const user = await getCachedUser(decoded.id);
   if (!user) {
     throw ApiError.unauthorized("User associated with this token no longer exists.");
   }
