@@ -13,7 +13,9 @@ async function getCachedUser(userId) {
     return hit.user;
   }
 
-  const user = await User.findById(userId).select("-password").lean();
+  // Must be a Mongoose document (not .lean()) so controllers can call
+  // user.toSafeObject() / user.save() after authenticate.
+  const user = await User.findById(userId).select("-password");
   if (user) {
     userCache.set(String(userId), { user, at: Date.now() });
   } else {

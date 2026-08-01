@@ -6,7 +6,11 @@ import User from "../models/user.model.js";
 
 // GET /api/v1/users/me
 const getProfile = asyncHandler(async (req, res) => {
-  return new ApiResponse(200, "Profile fetched successfully.", req.user.toSafeObject()).send(res);
+  const profile =
+    typeof req.user?.toSafeObject === "function"
+      ? req.user.toSafeObject()
+      : req.user;
+  return new ApiResponse(200, "Profile fetched successfully.", profile).send(res);
 });
 
 // PATCH /api/v1/users/me
