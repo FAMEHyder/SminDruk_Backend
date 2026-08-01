@@ -270,7 +270,8 @@ const oauthCallback = asyncHandler(async (req, res) => {
   const frontendUrl = resolveOAuthFrontendUrl(req);
   res.clearCookie("oauth_return_to", { path: "/" });
 
-  const redirectUrl = new URL(`${frontendUrl}/dashboard`);
+  // Dedicated page establishes the session before the dashboard guard runs.
+  const redirectUrl = new URL(`${frontendUrl}/auth/callback`);
   redirectUrl.searchParams.set("accessToken", accessToken);
   redirectUrl.searchParams.set("refreshToken", newRefreshToken);
 

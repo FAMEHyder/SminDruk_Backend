@@ -15,11 +15,17 @@ const router = express.Router();
 
 const OAUTH_RETURN_COOKIE = "oauth_return_to";
 
-/** Persist the frontend origin that started OAuth (localhost vs Vercel). */
-const rememberOAuthReturnTo = (req, res, next) => {
+const readReturnTo = (req) => {
   const raw = typeof req.query.returnTo === "string" ? req.query.returnTo : "";
   const returnTo = trimTrailingSlash(raw);
-  if (returnTo && getAllowedOrigins().has(returnTo)) {
+  if (returnTo && getAllowedOrigins().has(returnTo)) return returnTo;
+  return "";
+};
+
+/** Persist the frontend origin that started OAuth (cookie + OAuth state). */
+const rememberOAuthReturnTo = (req, res, next) => {
+  const returnTo = readReturnTo(req);
+  if (returnTo) {
     res.cookie(OAUTH_RETURN_COOKIE, returnTo, {
       httpOnly: true,
       sameSite: "lax",
@@ -86,12 +92,18 @@ router.get(
   "/google",
   requireStrategy("google"),
   rememberOAuthReturnTo,
-  (req, res, next) =>
-    passport.authenticate("google", {
+  (req, res, next) => {
+    const returnTo = readReturnTo(req);
+    const state = returnTo
+      ? Buffer.from(JSON.stringify({ returnTo }), "utf8").toString("base64url")
+      : undefined;
+    return passport.authenticate("google", {
       scope: ["profile", "email"],
       session: false,
       callbackURL: getGoogleCallbackUrl(),
-    })(req, res, next)
+      ...(state ? { state } : {}),
+    })(req, res, next);
+  }
 );
 router.get(
   "/google/callback",

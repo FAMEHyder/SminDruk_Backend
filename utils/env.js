@@ -71,36 +71,41 @@ const getGoogleClientSecret = () => getEnv("GOOGLE_CLIENT_SECRET", "Google_Clien
 
 /**
  * Google OAuth callback URI — must match Google Cloud Console exactly.
- * - Production / Railway → live callback (or GOOGLE_CALLBACK_URL)
- * - Local dev → local API callback so login can return to localhost
+ * Always the live Railway URI (never localhost).
+ * https://smindruk.up.railway.app/api/v1/auth/callback/google
  */
 const getGoogleCallbackUrl = () => {
   const fromEnv = getEnv("GOOGLE_CALLBACK_URL", "Google_Redirect_URI", "GOOGLE_REDIRECT_URI");
-  const path = fromEnv?.startsWith("/") ? fromEnv : "/api/v1/auth/callback/google";
-
-  if (!isProduction()) {
-    if (fromEnv?.startsWith("http") && /localhost|127\.0\.0\.1/.test(fromEnv)) {
-      return trimTrailingSlash(fromEnv);
-    }
-    return `${getLocalApiUrl()}${path.startsWith("/") ? path : `/${path}`}`;
-  }
-
   if (fromEnv?.startsWith("http")) return trimTrailingSlash(fromEnv);
+
+  const path = fromEnv?.startsWith("/") ? fromEnv : "/api/v1/auth/callback/google";
   return `${getLiveApiUrl()}${path}`;
 };
 
 /**
  * Resolves where to send the browser after OAuth (success or failure).
- * Prefers a short-lived cookie set at /auth/google?returnTo=..., falling back
- * to FRONTEND_URL_LIVE / FRONTEND_URL_LOCAL.
+ * Prefers oauth_return_to cookie, then OAuth `state`, then FRONTEND_URL_*.
  */
 const resolveOAuthFrontendUrl = (req) => {
   const allowed = getAllowedOrigins();
+
   const fromCookie = req?.cookies?.oauth_return_to;
   if (typeof fromCookie === "string") {
     const candidate = trimTrailingSlash(fromCookie);
     if (candidate && allowed.has(candidate)) return candidate;
   }
+
+  try {
+    const rawState = typeof req?.query?.state === "string" ? req.query.state : "";
+    if (rawState) {
+      const parsed = JSON.parse(Buffer.from(rawState, "base64url").toString("utf8"));
+      const candidate = trimTrailingSlash(parsed?.returnTo);
+      if (candidate && allowed.has(candidate)) return candidate;
+    }
+  } catch {
+    // ignore malformed state
+  }
+
   return getFrontendUrl();
 };
 
