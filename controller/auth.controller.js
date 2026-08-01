@@ -1,5 +1,5 @@
 import { generateAuthTokens, verifyRefreshToken } from "../utils/generateTokens.js";
-import { getFrontendUrl } from "../utils/env.js";
+import { getFrontendUrl, resolveOAuthFrontendUrl } from "../utils/env.js";
 import crypto from "crypto";
 import asyncHandler from "../utils/asyncHandler.js";
 import ApiError from "../utils/apiError.js";
@@ -264,9 +264,13 @@ const verifyEmail = asyncHandler(async (req, res) => {
 // GET /api/v1/auth/google/callback, /github/callback, /facebook/callback
 // (passport.authenticate runs first in the route; req.user is already populated here)
 const oauthCallback = asyncHandler(async (req, res) => {
-  const { accessToken, refreshToken: newRefreshToken } = await issueTokensForUser(req.user, req);
+  // Match email "Remember me" behaviour — keep the Google session until logout.
+  const { accessToken, refreshToken: newRefreshToken } = await issueTokensForUser(req.user, req, true);
 
-  const redirectUrl = new URL(`${getFrontendUrl()}/dashboard`);
+  const frontendUrl = resolveOAuthFrontendUrl(req);
+  res.clearCookie("oauth_return_to", { path: "/" });
+
+  const redirectUrl = new URL(`${frontendUrl}/dashboard`);
   redirectUrl.searchParams.set("accessToken", accessToken);
   redirectUrl.searchParams.set("refreshToken", newRefreshToken);
 

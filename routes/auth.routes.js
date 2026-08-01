@@ -1,6 +1,11 @@
 import { authValidators } from "../utils/validators.js";
 import { authLimiter } from "../middleware/rateLimiter.middleware.js";
-import { getFrontendUrl } from "../utils/env.js";
+import {
+  getAllowedOrigins,
+  getGoogleCallbackUrl,
+  resolveOAuthFrontendUrl,
+  trimTrailingSlash,
+} from "../utils/env.js";
 import express from "express";
 import passport from "passport";
 import * as authController from "../controller/auth.controller.js";
@@ -8,7 +13,38 @@ import validate from "../middleware/validate.middleware.js";
 
 const router = express.Router();
 
-const oauthFailureRedirect = () => `${getFrontendUrl()}/login?oauth=error`;
+const OAUTH_RETURN_COOKIE = "oauth_return_to";
+
+/** Persist the frontend origin that started OAuth (localhost vs Vercel). */
+const rememberOAuthReturnTo = (req, res, next) => {
+  const raw = typeof req.query.returnTo === "string" ? req.query.returnTo : "";
+  const returnTo = trimTrailingSlash(raw);
+  if (returnTo && getAllowedOrigins().has(returnTo)) {
+    res.cookie(OAUTH_RETURN_COOKIE, returnTo, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: req.secure || req.headers["x-forwarded-proto"] === "https",
+      maxAge: 10 * 60 * 1000,
+      path: "/",
+    });
+  }
+  next();
+};
+
+const oauthFailureRedirect = (req, res) => {
+  const frontend = resolveOAuthFrontendUrl(req);
+  res.clearCookie(OAUTH_RETURN_COOKIE, { path: "/" });
+  return res.redirect(`${frontend}/login?oauth=error`);
+};
+
+/** Custom passport callback so failure can honor the oauth_return_to cookie. */
+const authenticateOAuth = (strategy, options = {}) => (req, res, next) => {
+  passport.authenticate(strategy, { session: false, ...options }, (err, user) => {
+    if (err || !user) return oauthFailureRedirect(req, res);
+    req.user = user;
+    return next();
+  })(req, res, next);
+};
 
 router.post("/register", authLimiter, validate(authValidators.register), authController.register);
 router.post("/login", authLimiter, validate(authValidators.login), authController.login);
@@ -49,27 +85,25 @@ const requireStrategy = (name) => (req, res, next) => {
 router.get(
   "/google",
   requireStrategy("google"),
-  passport.authenticate("google", { scope: ["profile", "email"], session: false })
+  rememberOAuthReturnTo,
+  (req, res, next) =>
+    passport.authenticate("google", {
+      scope: ["profile", "email"],
+      session: false,
+      callbackURL: getGoogleCallbackUrl(),
+    })(req, res, next)
 );
 router.get(
   "/google/callback",
   requireStrategy("google"),
-  (req, res, next) =>
-    passport.authenticate("google", {
-      session: false,
-      failureRedirect: oauthFailureRedirect(),
-    })(req, res, next),
+  authenticateOAuth("google", { callbackURL: getGoogleCallbackUrl() }),
   authController.oauthCallback
 );
 /** Alias for Google Console apps registered with /auth/callback/google */
 router.get(
   "/callback/google",
   requireStrategy("google"),
-  (req, res, next) =>
-    passport.authenticate("google", {
-      session: false,
-      failureRedirect: oauthFailureRedirect(),
-    })(req, res, next),
+  authenticateOAuth("google", { callbackURL: getGoogleCallbackUrl() }),
   authController.oauthCallback
 );
 
@@ -77,16 +111,13 @@ router.get(
 router.get(
   "/github",
   requireStrategy("github"),
+  rememberOAuthReturnTo,
   passport.authenticate("github", { scope: ["user:email"], session: false })
 );
 router.get(
   "/github/callback",
   requireStrategy("github"),
-  (req, res, next) =>
-    passport.authenticate("github", {
-      session: false,
-      failureRedirect: oauthFailureRedirect(),
-    })(req, res, next),
+  authenticateOAuth("github"),
   authController.oauthCallback
 );
 
@@ -94,16 +125,13 @@ router.get(
 router.get(
   "/facebook",
   requireStrategy("facebook"),
+  rememberOAuthReturnTo,
   passport.authenticate("facebook", { scope: ["email"], session: false })
 );
 router.get(
   "/facebook/callback",
   requireStrategy("facebook"),
-  (req, res, next) =>
-    passport.authenticate("facebook", {
-      session: false,
-      failureRedirect: oauthFailureRedirect(),
-    })(req, res, next),
+  authenticateOAuth("facebook"),
   authController.oauthCallback
 );
 
