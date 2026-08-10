@@ -47,10 +47,15 @@ const xConnectStart = (req, res) => {
 // GET /api/v1/social-accounts/x/callback
 const xConnectCallback = asyncHandler(async (req, res) => {
   const { code, state, error } = req.query;
-  if (error || !code || !state) return res.redirect(getXFrontendUrl("error"));
+  let returnTo;
+  if (error || !code || !state) {
+    const reason = typeof req.query.error_description === "string" ? req.query.error_description : "Authorization was cancelled.";
+    return res.redirect(`${getXFrontendUrl("error")}&reason=${encodeURIComponent(reason)}`);
+  }
 
   try {
     const { state: stateData, tokens } = await exchangeXCode({ code, state });
+    returnTo = stateData.returnTo;
     const profileResponse = await axios.get("https://api.x.com/2/users/me", {
       headers: { Authorization: `Bearer ${tokens.access_token}` },
       params: { "user.fields": "profile_image_url,public_metrics,description" },
@@ -82,10 +87,11 @@ const xConnectCallback = asyncHandler(async (req, res) => {
       },
       { upsert: true, new: true }
     );
-    return res.redirect(getXFrontendUrl("connected", stateData.returnTo));
+    return res.redirect(getXFrontendUrl("connected", returnTo));
   } catch (connectError) {
-    logger.error(`X connect callback failed: ${connectError.response?.data?.detail || connectError.message}`);
-    return res.redirect(getXFrontendUrl("error"));
+    const reason = connectError.response?.data?.detail || connectError.response?.data?.title || connectError.message;
+    logger.error(`X connect callback failed: ${reason}`);
+    return res.redirect(`${getXFrontendUrl("error", returnTo)}&reason=${encodeURIComponent(reason)}`);
   }
 });
 
