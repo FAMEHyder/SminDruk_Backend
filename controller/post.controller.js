@@ -35,8 +35,12 @@ const createPost = asyncHandler(async (req, res) => {
     throw ApiError.badRequest("scheduledAt is required when status is scheduled.");
   }
 
-  if (resolvedStatus === "scheduled" && platforms.includes("facebook") && (!socialAccountIds || socialAccountIds.length === 0)) {
-    throw ApiError.badRequest("Select at least one Facebook page for scheduled posts.");
+  if (
+    resolvedStatus === "scheduled" &&
+    (platforms.includes("facebook") || platforms.includes("x")) &&
+    (!socialAccountIds || socialAccountIds.length === 0)
+  ) {
+    throw ApiError.badRequest("Select at least one connected account for scheduled posts.");
   }
 
   const post = await Post.create({
@@ -338,9 +342,11 @@ const publishPostNow = asyncHandler(async (req, res) => {
 
 
 
-  if (post.platforms.includes("facebook") && (!post.socialAccounts || post.socialAccounts.length === 0)) {
-
-    throw ApiError.badRequest("Select at least one Facebook page before publishing.");
+  if (
+    (post.platforms.includes("facebook") || post.platforms.includes("x")) &&
+    (!post.socialAccounts || post.socialAccounts.length === 0)
+  ) {
+    throw ApiError.badRequest("Select at least one connected account before publishing.");
 
   }
 

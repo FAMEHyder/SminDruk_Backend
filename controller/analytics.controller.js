@@ -2,6 +2,8 @@ import asyncHandler from "../utils/asyncHandler.js";
 import ApiResponse from "../utils/apiResponse.js";
 import Analytics from "../models/analytics.model.js";
 import { syncWorkspaceFacebookAnalytics } from "../utils/facebookInsights.js";
+import SocialAccount from "../models/socialAccount.model.js";
+import { syncXPostsForAccount } from "../utils/x.js";
 import logger from "../utils/logger.js";
 
 // POST /api/v1/analytics (ingest a metrics snapshot — typically called by a sync worker)
@@ -20,6 +22,10 @@ const getReport = asyncHandler(async (req, res) => {
     syncWorkspaceFacebookAnalytics(workspaceId).catch((error) => {
       logger.warn(`Analytics sync skipped: ${error.message}`);
     });
+    SocialAccount.find({ workspace: workspaceId, platform: "x", status: "connected" })
+      .select("_id")
+      .then((accounts) => Promise.allSettled(accounts.map((account) => syncXPostsForAccount(account._id))))
+      .catch((error) => logger.warn(`X analytics sync skipped: ${error.message}`));
   }
 
   const filter = { workspace: workspaceId, period };

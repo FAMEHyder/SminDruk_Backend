@@ -1,5 +1,6 @@
 import Post from "../models/post.model.js";
 import { publishPostToFacebookPages } from "./facebookPublish.js";
+import { publishPostToXAccounts } from "./xPublish.js";
 
 /**
  * Executes publishing for a post document (Facebook Pages + future platforms).
@@ -32,7 +33,21 @@ const executePublish = async (post) => {
     }
   }
 
-  const unsupported = post.platforms.filter((platform) => platform !== "facebook");
+  if (post.platforms.includes("x")) {
+    const { results } = await publishPostToXAccounts(post);
+    for (const result of results) {
+      if (result.success && result.postId) {
+        post.platformPostIds.set(`x_${result.accountId}`, result.postId);
+      } else if (!result.success) {
+        failures.push(`${result.accountName}: ${result.error}`);
+      }
+    }
+    if (results.length > 0 && results.every((result) => !result.success)) {
+      throw new Error(failures[0] || "X publish failed for all selected accounts.");
+    }
+  }
+
+  const unsupported = post.platforms.filter((platform) => !["facebook", "x"].includes(platform));
   if (unsupported.length > 0) {
     failures.push(`Not yet supported: ${unsupported.join(", ")}`);
   }

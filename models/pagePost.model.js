@@ -10,6 +10,7 @@ const pagePostSchema = new mongoose.Schema(
     pageNumber: { type: Number },
     pageName: { type: String, required: true },
     pageId: { type: String, required: true },
+    platform: { type: String, enum: ["facebook", "x"], default: "facebook", index: true },
     platformPostId: { type: String },
     postLink: { type: String },
     postContent: { type: String, default: "" },
@@ -23,6 +24,7 @@ const pagePostSchema = new mongoose.Schema(
 pagePostSchema.index({ workspace: 1, pageId: 1, createdAt: -1 });
 pagePostSchema.index({ workspace: 1, success: 1, createdAt: -1 });
 pagePostSchema.index({ workspace: 1, success: 1, platformPostId: 1 });
+pagePostSchema.index({ socialAccount: 1, platformPostId: 1 }, { unique: true, sparse: true });
 pagePostSchema.index({ secretKey: 1, createdAt: -1 });
 
 export default mongoose.model("PagePost", pagePostSchema);

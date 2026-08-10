@@ -5,6 +5,7 @@ import Notification from "../models/notification.model.js";
 import { executePublish } from "./publishPost.js";
 import { executeBulkPublish } from "./bulkFacebookPublish.js";
 import { runFacebookTokenRefreshJob } from "./facebookTokenRefresh.js";
+import { runXTokenRefreshJob } from "./x.js";
 import logger from "./logger.js";
 
 const STUCK_PUBLISHING_MS = 10 * 60 * 1000;
@@ -80,6 +81,9 @@ const runScheduledPostsJob = async () => {
     try {
       if (post.platforms.includes("facebook") && (!post.socialAccounts || post.socialAccounts.length === 0)) {
         throw new Error("No Facebook pages selected for this scheduled post.");
+      }
+      if (post.platforms.includes("x") && (!post.socialAccounts || post.socialAccounts.length === 0)) {
+        throw new Error("No X accounts selected for this scheduled post.");
       }
 
       await executePublish(post);
@@ -214,12 +218,15 @@ const startScheduler = () => {
       runFacebookTokenRefreshJob().catch((error) =>
         logger.error(`Facebook token refresh job crashed: ${error.message}`)
       );
+      runXTokenRefreshJob().catch((error) =>
+        logger.error(`X token refresh job crashed: ${error.message}`)
+      );
     },
     { timezone: cronTimezone }
   );
 
   logger.info("Post scheduler started (running every minute).");
-  logger.info(`Facebook token refresh scheduled daily at 12:00 PM (${cronTimezone}).`);
+  logger.info(`Facebook and X token refresh scheduled daily at 12:00 PM (${cronTimezone}).`);
 
   runScheduledPostsJob().catch((error) =>
     logger.error(`Initial scheduler run failed: ${error.message}`)
@@ -229,4 +236,4 @@ const startScheduler = () => {
   );
 };
 
-export { startScheduler, runScheduledPostsJob, runScheduledBulkPostsJob, runFacebookTokenRefreshJob };
+export { startScheduler, runScheduledPostsJob, runScheduledBulkPostsJob, runFacebookTokenRefreshJob, runXTokenRefreshJob };

@@ -1,6 +1,6 @@
 import { encrypt } from "../utils/encrypt.js";
 import { refreshFacebookTokensForAccount, runFacebookTokenRefreshJob } from "../utils/facebookTokenRefresh.js";
-import { getApiUrl, getFrontendUrl } from "../utils/env.js";
+import { getAllowedOrigins, getApiUrl, getFrontendUrl, trimTrailingSlash } from "../utils/env.js";
 import axios from "axios";
 import crypto from "crypto";
 import asyncHandler from "../utils/asyncHandler.js";
@@ -9,6 +9,14 @@ import ApiResponse from "../utils/apiResponse.js";
 import SocialAccount from "../models/socialAccount.model.js";
 import ConnectedPage from "../models/connectedPage.model.js";
 import { getNextPageNumbers } from "../utils/connectedPageNumbers.js";
+import {
+  createXAuthorizationUrl,
+  exchangeXCode,
+  getXFrontendUrl,
+  refreshXTokensForAccount,
+  runXTokenRefreshJob,
+  syncXPostsForAccount,
+} from "../utils/x.js";
 import logger from "../utils/logger.js";
 
 /**
@@ -24,6 +32,62 @@ const FB_GRAPH_VERSION = "v19.0";
 const FB_PAGE_TOKEN_TTL_DAYS = 60;
 
 const getFacebookRedirectUri = () => `${getApiUrl()}/api/v1/social-accounts/facebook/callback`;
+
+// GET /api/v1/social-accounts/x/connect?workspaceId=&userId=
+const xConnectStart = (req, res) => {
+  const { workspaceId, userId, returnTo } = req.query;
+  if (!workspaceId || !userId) {
+    throw ApiError.badRequest("workspaceId and userId are required to start the X connection.");
+  }
+  const frontendUrl = typeof returnTo === "string" ? trimTrailingSlash(returnTo) : "";
+  const safeReturnTo = getAllowedOrigins().has(frontendUrl) ? frontendUrl : getFrontendUrl();
+  return res.redirect(createXAuthorizationUrl({ workspaceId, userId, returnTo: safeReturnTo }));
+};
+
+// GET /api/v1/social-accounts/x/callback
+const xConnectCallback = asyncHandler(async (req, res) => {
+  const { code, state, error } = req.query;
+  if (error || !code || !state) return res.redirect(getXFrontendUrl("error"));
+
+  try {
+    const { state: stateData, tokens } = await exchangeXCode({ code, state });
+    const profileResponse = await axios.get("https://api.x.com/2/users/me", {
+      headers: { Authorization: `Bearer ${tokens.access_token}` },
+      params: { "user.fields": "profile_image_url,public_metrics,description" },
+    });
+    const profile = profileResponse.data?.data;
+    if (!profile?.id || !profile?.username) throw new Error("X did not return an account profile.");
+
+    await SocialAccount.findOneAndUpdate(
+      { workspace: stateData.workspaceId, platform: "x", accountId: profile.id },
+      {
+        workspace: stateData.workspaceId,
+        connectedBy: stateData.userId,
+        platform: "x",
+        accountId: profile.id,
+        accountName: `@${profile.username}`,
+        username: profile.username,
+        category: profile.description || "",
+        avatar: profile.profile_image_url || "",
+        followersCount: profile.public_metrics?.followers_count || 0,
+        accessToken: encrypt(tokens.access_token),
+        refreshToken: tokens.refresh_token ? encrypt(tokens.refresh_token) : undefined,
+        tokenIssuedAt: new Date(),
+        tokenExpiresAt: new Date(Date.now() + (tokens.expires_in || 7200) * 1000),
+        status: "connected",
+        connectSource: "manage",
+        lastSyncedAt: new Date(),
+        lastTokenRefreshAttemptAt: null,
+        lastTokenRefreshError: null,
+      },
+      { upsert: true, new: true }
+    );
+    return res.redirect(getXFrontendUrl("connected", stateData.returnTo));
+  } catch (connectError) {
+    logger.error(`X connect callback failed: ${connectError.response?.data?.detail || connectError.message}`);
+    return res.redirect(getXFrontendUrl("error"));
+  }
+});
 
 // GET /api/v1/social-accounts/facebook/connect?workspaceId=&userId=&connectMode=
 const facebookConnectStart = (req, res) => {
@@ -293,8 +357,12 @@ const refreshAccountToken = asyncHandler(async (req, res) => {
   const account = await SocialAccount.findById(req.params.id);
   if (!account) throw ApiError.notFound("Social account not found.");
 
+  if (account.platform === "x") {
+    const result = await refreshXTokensForAccount(account._id);
+    return new ApiResponse(200, "X account tokens refreshed successfully.", result).send(res);
+  }
   if (account.platform !== "facebook") {
-    throw ApiError.badRequest("Manual token refresh is only supported for Facebook pages right now.");
+    throw ApiError.badRequest("Manual token refresh is only supported for Facebook and X accounts.");
   }
 
   const result = await refreshFacebookTokensForAccount(account._id);
@@ -305,6 +373,11 @@ const refreshAccountToken = asyncHandler(async (req, res) => {
 const syncAccount = asyncHandler(async (req, res) => {
   const account = await SocialAccount.findById(req.params.id);
   if (!account) throw ApiError.notFound("Social account not found.");
+
+  if (account.platform === "x") {
+    const posts = await syncXPostsForAccount(account._id);
+    return new ApiResponse(200, "X posts and engagement synced successfully.", { posts }).send(res);
+  }
 
   // TODO: pull latest profile info / follower counts from the platform API.
   account.lastSyncedAt = new Date();
@@ -337,8 +410,8 @@ const cronRefreshTokens = asyncHandler(async (req, res) => {
     throw ApiError.unauthorized("Invalid cron secret.");
   }
 
-  const result = await runFacebookTokenRefreshJob();
-  return new ApiResponse(200, "Facebook token refresh job completed.", result).send(res);
+  const [facebook, x] = await Promise.all([runFacebookTokenRefreshJob(), runXTokenRefreshJob()]);
+  return new ApiResponse(200, "Social token refresh job completed.", { facebook, x }).send(res);
 });
 
 export {
@@ -350,5 +423,7 @@ export {
   checkConnectionStatus,
   facebookConnectStart,
   facebookConnectCallback,
+  xConnectStart,
+  xConnectCallback,
   cronRefreshTokens,
 };

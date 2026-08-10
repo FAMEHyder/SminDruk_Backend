@@ -13,6 +13,8 @@ const router = express.Router();
  */
 router.get("/facebook/connect", socialAccountController.facebookConnectStart);
 router.get("/facebook/callback", socialAccountController.facebookConnectCallback);
+router.get("/x/connect", socialAccountController.xConnectStart);
+router.get("/x/callback", socialAccountController.xConnectCallback);
 router.post("/cron/refresh-tokens", socialAccountController.cronRefreshTokens);
 
 router.use(authenticate);

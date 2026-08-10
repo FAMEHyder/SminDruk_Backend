@@ -23,9 +23,12 @@ const socialAccountSchema = new mongoose.Schema(
     },
     accountId: { type: String, required: true },
     accountName: { type: String, required: true },
+    /** X handle without @; empty for platforms that do not use a handle. */
+    username: { type: String, default: "" },
     /** Facebook/Google Business page category, e.g. "Restaurant", "Local Business". */
     category: { type: String, default: "" },
     avatar: { type: String, default: "" },
+    followersCount: { type: Number, default: 0 },
     accessToken: { type: String, required: true, select: false },
     refreshToken: { type: String, select: false },
     /** Long-lived user token that produced this page/account token (Facebook-style flows). */
