@@ -33,6 +33,25 @@ const FB_PAGE_TOKEN_TTL_DAYS = 60;
 
 const getFacebookRedirectUri = () => `${getApiUrl()}/api/v1/social-accounts/facebook/callback`;
 
+const getXErrorDetails = (error) => {
+  const data = error?.response?.data;
+  const raw = data ? JSON.stringify(data) : error?.message || "Unknown X OAuth error.";
+  return {
+    status: error?.response?.status || 500,
+    message: data?.error_description || data?.detail || data?.title || data?.message || data?.error || error?.message || "Unknown X OAuth error.",
+    raw,
+  };
+};
+
+const getXErrorRedirect = (returnTo, error) => {
+  const { status, message, raw } = getXErrorDetails(error);
+  const url = new URL(getXFrontendUrl("error", returnTo));
+  url.searchParams.set("reason", message);
+  url.searchParams.set("xStatus", String(status));
+  url.searchParams.set("xError", raw);
+  return url.toString();
+};
+
 // GET /api/v1/social-accounts/x/connect?workspaceId=&userId=
 const xConnectStart = (req, res) => {
   const { workspaceId, userId, returnTo } = req.query;
@@ -49,8 +68,18 @@ const xConnectCallback = asyncHandler(async (req, res) => {
   const { code, state, error } = req.query;
   let returnTo;
   if (error || !code || !state) {
-    const reason = typeof req.query.error_description === "string" ? req.query.error_description : "Authorization was cancelled.";
-    return res.redirect(`${getXFrontendUrl("error")}&reason=${encodeURIComponent(reason)}`);
+    return res.redirect(
+      getXErrorRedirect(undefined, {
+        response: {
+          status: 400,
+          data: {
+            error: typeof error === "string" ? error : "authorization_failed",
+            error_description:
+              typeof req.query.error_description === "string" ? req.query.error_description : "Authorization was cancelled.",
+          },
+        },
+      })
+    );
   }
 
   try {
@@ -89,11 +118,25 @@ const xConnectCallback = asyncHandler(async (req, res) => {
     );
     return res.redirect(getXFrontendUrl("connected", returnTo));
   } catch (connectError) {
-    const reason = connectError.response?.data?.detail || connectError.response?.data?.title || connectError.message;
-    logger.error(`X connect callback failed: ${reason}`);
-    return res.redirect(`${getXFrontendUrl("error", returnTo)}&reason=${encodeURIComponent(reason)}`);
+    const { status, message } = getXErrorDetails(connectError);
+    logger.error(`X connect callback failed (${status}): ${message}`);
+    return res.redirect(getXErrorRedirect(returnTo, connectError));
   }
 });
+
+// GET /api/v1/social-accounts/x-error
+// This public diagnostic response is intentionally called by the frontend after
+// an OAuth redirect so the exact X error is visible in browser DevTools > Network.
+const xErrorDiagnostic = (req, res) => {
+  const xStatus = Number(req.query.xStatus);
+  const xError = typeof req.query.xError === "string" ? req.query.xError : "No X error payload was returned.";
+  return res.status(200).json({
+    success: false,
+    statusCode: Number.isInteger(xStatus) ? xStatus : 500,
+    message: "X OAuth connection failed.",
+    xError,
+  });
+};
 
 // GET /api/v1/social-accounts/facebook/connect?workspaceId=&userId=&connectMode=
 const facebookConnectStart = (req, res) => {
@@ -431,5 +474,6 @@ export {
   facebookConnectCallback,
   xConnectStart,
   xConnectCallback,
+  xErrorDiagnostic,
   cronRefreshTokens,
 };
