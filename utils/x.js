@@ -23,7 +23,9 @@ const getXConfig = () => {
   return { clientId, clientSecret, callbackUrl };
 };
 
-const base64Url = (value) => Buffer.from(value).toString("base64url");
+// HTTP Basic authentication requires RFC 4648 Base64, not the URL-safe
+// Base64URL encoding used by PKCE/JWT values.
+const basicAuth = (value) => Buffer.from(value).toString("base64");
 const createCodeVerifier = () => crypto.randomBytes(48).toString("base64url");
 const createCodeChallenge = (verifier) => crypto.createHash("sha256").update(verifier).digest("base64url");
 const buildXPostLink = (username, postId) => (username && postId ? `https://x.com/${username.replace(/^@/, "")}/status/${postId}` : null);
@@ -58,7 +60,7 @@ const exchangeXCode = async ({ code, state }) => {
   const tokenResponse = await axios.post("https://api.x.com/2/oauth2/token", body.toString(), {
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
-      Authorization: `Basic ${base64Url(`${clientId}:${clientSecret}`)}`,
+      Authorization: `Basic ${basicAuth(`${clientId}:${clientSecret}`)}`,
     },
   });
   return { state: payload, tokens: tokenResponse.data };
@@ -80,7 +82,7 @@ const refreshXTokensForAccount = async (accountId) => {
     const { data } = await axios.post("https://api.x.com/2/oauth2/token", body.toString(), {
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
-        Authorization: `Basic ${base64Url(`${clientId}:${clientSecret}`)}`,
+        Authorization: `Basic ${basicAuth(`${clientId}:${clientSecret}`)}`,
       },
     });
     account.accessToken = encrypt(data.access_token);
