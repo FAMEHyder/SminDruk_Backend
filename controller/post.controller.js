@@ -37,7 +37,7 @@ const createPost = asyncHandler(async (req, res) => {
 
   if (
     resolvedStatus === "scheduled" &&
-    (platforms.includes("facebook") || platforms.includes("x")) &&
+    (platforms.includes("facebook") || platforms.includes("instagram") || platforms.includes("x")) &&
     (!socialAccountIds || socialAccountIds.length === 0)
   ) {
     throw ApiError.badRequest("Select at least one connected account for scheduled posts.");

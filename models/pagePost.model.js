@@ -10,7 +10,7 @@ const pagePostSchema = new mongoose.Schema(
     pageNumber: { type: Number },
     pageName: { type: String, required: true },
     pageId: { type: String, required: true },
-    platform: { type: String, enum: ["facebook", "x"], default: "facebook", index: true },
+    platform: { type: String, enum: ["facebook", "instagram", "x"], default: "facebook", index: true },
     platformPostId: { type: String },
     postLink: { type: String },
     postContent: { type: String, default: "" },

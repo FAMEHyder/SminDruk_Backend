@@ -13,6 +13,8 @@ const router = express.Router();
  */
 router.get("/facebook/connect", socialAccountController.facebookConnectStart);
 router.get("/facebook/callback", socialAccountController.facebookConnectCallback);
+router.get("/instagram/connect", socialAccountController.instagramConnectStart);
+router.get("/instagram/callback", socialAccountController.instagramConnectCallback);
 router.get("/x/connect", socialAccountController.xConnectStart);
 router.get("/x/callback", socialAccountController.xConnectCallback);
 router.get("/x-error", socialAccountController.xErrorDiagnostic);

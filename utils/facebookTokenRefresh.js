@@ -19,14 +19,14 @@ const getTokenRefreshCronMaxBefore = () =>
   new Date(Date.now() - TOKEN_REFRESH_CRON_MAX_DAYS * 24 * 60 * 60 * 1000);
 
 /**
- * Refreshes the long-lived Facebook user token and re-fetches page tokens
- * for every page returned by /me/accounts in the same workspace connection group.
+ * Refreshes the long-lived Meta user token and re-fetches Facebook Page and
+ * linked Instagram professional-account tokens in the same connection group.
  */
 const refreshFacebookTokensForAccount = async (accountId) => {
   const account = await SocialAccount.findById(accountId).select("+userAccessToken");
   if (!account) throw new Error("Social account not found.");
-  if (account.platform !== "facebook") throw new Error("Token refresh is only supported for Facebook pages.");
-  if (!account.userAccessToken) throw new Error("No stored Facebook user token for this page.");
+  if (!["facebook", "instagram"].includes(account.platform)) throw new Error("Token refresh is only supported for Meta accounts.");
+  if (!account.userAccessToken) throw new Error("No stored Meta user token for this account.");
 
   let currentUserToken;
   try {
@@ -50,7 +50,7 @@ const refreshFacebookTokensForAccount = async (accountId) => {
   const pagesRes = await axios.get(`https://graph.facebook.com/${FB_GRAPH_VERSION}/me/accounts`, {
     params: {
       access_token: newLongUserToken,
-      fields: "id,name,category,picture{url},access_token",
+      fields: "id,name,category,picture{url},access_token,instagram_business_account{id,username,name,profile_picture_url,followers_count}",
     },
   });
 
@@ -83,6 +83,28 @@ const refreshFacebookTokensForAccount = async (accountId) => {
     );
 
     if (updated) pagesUpdated += 1;
+
+    const instagram = page.instagram_business_account;
+    if (instagram?.id) {
+      await SocialAccount.findOneAndUpdate(
+        { workspace: account.workspace, platform: "instagram", accountId: instagram.id },
+        {
+          accessToken: encrypt(page.access_token),
+          userAccessToken: encryptedUserToken,
+          tokenIssuedAt,
+          tokenExpiresAt,
+          accountName: instagram.username ? `@${instagram.username}` : instagram.name || "Instagram account",
+          username: instagram.username || "",
+          avatar: instagram.profile_picture_url || "",
+          followersCount: instagram.followers_count || 0,
+          status: "connected",
+          lastSyncedAt: tokenIssuedAt,
+          lastTokenRefreshAttemptAt: tokenIssuedAt,
+          lastTokenRefreshError: null,
+        },
+        { new: true }
+      );
+    }
   }
 
   logger.info(
@@ -173,7 +195,7 @@ const markFacebookTokenRefreshFailed = async (account, errorMessage) => {
     {
       workspace: account.workspace,
       connectedBy: account.connectedBy,
-      platform: "facebook",
+      platform: { $in: ["facebook", "instagram"] },
       status: "connected",
     },
     {
@@ -228,7 +250,7 @@ const runFacebookTokenRefreshJob = async () => {
 
   const [dueManageAccounts, dueDatasetPages] = await Promise.all([
     SocialAccount.find({
-      platform: "facebook",
+      platform: { $in: ["facebook", "instagram"] },
       status: "connected",
       userAccessToken: { $exists: true, $ne: null },
       ...dateFilter,

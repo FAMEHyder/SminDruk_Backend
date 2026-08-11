@@ -1,6 +1,6 @@
 import { encrypt } from "../utils/encrypt.js";
 import { refreshFacebookTokensForAccount, runFacebookTokenRefreshJob } from "../utils/facebookTokenRefresh.js";
-import { getAllowedOrigins, getApiUrl, getFrontendUrl, trimTrailingSlash } from "../utils/env.js";
+import { getAllowedOrigins, getApiUrl, getEnv, getFrontendUrl, trimTrailingSlash } from "../utils/env.js";
 import axios from "axios";
 import crypto from "crypto";
 import asyncHandler from "../utils/asyncHandler.js";
@@ -32,6 +32,9 @@ const FB_GRAPH_VERSION = "v19.0";
 const FB_PAGE_TOKEN_TTL_DAYS = 60;
 
 const getFacebookRedirectUri = () => `${getApiUrl()}/api/v1/social-accounts/facebook/callback`;
+const getInstagramRedirectUri = () =>
+  getEnv("INSTAGRAM_CALLBACK_URI", "INSTAGRAM_CALLBACK_URL") ||
+  `${getApiUrl()}/api/v1/social-accounts/instagram/callback`;
 
 const getXErrorDetails = (error) => {
   const data = error?.response?.data;
@@ -137,6 +140,113 @@ const xErrorDiagnostic = (req, res) => {
     xError,
   });
 };
+
+// GET /api/v1/social-accounts/instagram/connect?workspaceId=&userId=&returnTo=
+const instagramConnectStart = (req, res) => {
+  const { workspaceId, userId, returnTo } = req.query;
+  if (!workspaceId || !userId) {
+    throw ApiError.badRequest("workspaceId and userId are required to start the Instagram connection.");
+  }
+
+  const frontendUrl = typeof returnTo === "string" ? trimTrailingSlash(returnTo) : "";
+  const safeReturnTo = getAllowedOrigins().has(frontendUrl) ? frontendUrl : getFrontendUrl();
+  const state = encodeURIComponent(JSON.stringify({ workspaceId, userId, returnTo: safeReturnTo, nonce: crypto.randomUUID() }));
+  const scopes = ["instagram_basic", "instagram_content_publish", "pages_show_list", "pages_read_engagement"];
+  const url =
+    `https://www.facebook.com/${FB_GRAPH_VERSION}/dialog/oauth` +
+    `?client_id=${process.env.FB_APP_ID}` +
+    `&redirect_uri=${encodeURIComponent(getInstagramRedirectUri())}` +
+    `&scope=${scopes.join(",")}` +
+    `&response_type=code` +
+    `&state=${state}`;
+
+  return res.redirect(url);
+};
+
+// GET /api/v1/social-accounts/instagram/callback
+const instagramConnectCallback = asyncHandler(async (req, res) => {
+  const { code, state, error: instagramError } = req.query;
+  let returnTo = getFrontendUrl();
+
+  if (instagramError || !code || !state) {
+    const reason = typeof req.query.error_description === "string" ? req.query.error_description : "Instagram authorization was cancelled.";
+    return res.redirect(`${returnTo}/dashboard/connect-channels?ig=error&reason=${encodeURIComponent(reason)}`);
+  }
+
+  try {
+    const parsed = JSON.parse(decodeURIComponent(state));
+    const requestedReturnTo = trimTrailingSlash(parsed.returnTo);
+    returnTo = getAllowedOrigins().has(requestedReturnTo) ? requestedReturnTo : returnTo;
+
+    const tokenRes = await axios.get(`https://graph.facebook.com/${FB_GRAPH_VERSION}/oauth/access_token`, {
+      params: {
+        client_id: process.env.FB_APP_ID,
+        client_secret: process.env.FB_APP_SECRET,
+        redirect_uri: getInstagramRedirectUri(),
+        code,
+      },
+    });
+    const longTokenRes = await axios.get(`https://graph.facebook.com/${FB_GRAPH_VERSION}/oauth/access_token`, {
+      params: {
+        grant_type: "fb_exchange_token",
+        client_id: process.env.FB_APP_ID,
+        client_secret: process.env.FB_APP_SECRET,
+        fb_exchange_token: tokenRes.data.access_token,
+      },
+    });
+    const longUserToken = longTokenRes.data.access_token;
+    const pagesRes = await axios.get(`https://graph.facebook.com/${FB_GRAPH_VERSION}/me/accounts`, {
+      params: {
+        access_token: longUserToken,
+        fields: "id,access_token,instagram_business_account{id,username,name,profile_picture_url,followers_count}",
+      },
+    });
+
+    const accounts = (pagesRes.data.data || []).filter((page) => page.instagram_business_account?.id && page.access_token);
+    if (!accounts.length) {
+      return res.redirect(
+        `${returnTo}/dashboard/connect-channels?ig=error&reason=${encodeURIComponent(
+          "No Instagram professional account linked to a Facebook Page was found."
+        )}`
+      );
+    }
+
+    const tokenIssuedAt = new Date();
+    const tokenExpiresAt = new Date(Date.now() + FB_PAGE_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
+    for (const page of accounts) {
+      const instagram = page.instagram_business_account;
+      await SocialAccount.findOneAndUpdate(
+        { workspace: parsed.workspaceId, platform: "instagram", accountId: instagram.id },
+        {
+          workspace: parsed.workspaceId,
+          connectedBy: parsed.userId,
+          platform: "instagram",
+          accountId: instagram.id,
+          accountName: instagram.username ? `@${instagram.username}` : instagram.name || "Instagram account",
+          username: instagram.username || "",
+          avatar: instagram.profile_picture_url || "",
+          followersCount: instagram.followers_count || 0,
+          accessToken: encrypt(page.access_token),
+          userAccessToken: encrypt(longUserToken),
+          tokenIssuedAt,
+          tokenExpiresAt,
+          status: "connected",
+          connectSource: "manage",
+          lastSyncedAt: new Date(),
+          lastTokenRefreshAttemptAt: null,
+          lastTokenRefreshError: null,
+        },
+        { upsert: true, new: true }
+      );
+    }
+
+    return res.redirect(`${returnTo}/dashboard/connect-channels?ig=connected`);
+  } catch (connectError) {
+    const reason = connectError.response?.data?.error?.message || connectError.message;
+    logger.error(`Instagram connect callback failed: ${reason}`);
+    return res.redirect(`${returnTo}/dashboard/connect-channels?ig=error&reason=${encodeURIComponent(reason)}`);
+  }
+});
 
 // GET /api/v1/social-accounts/facebook/connect?workspaceId=&userId=&connectMode=
 const facebookConnectStart = (req, res) => {
@@ -472,6 +582,8 @@ export {
   checkConnectionStatus,
   facebookConnectStart,
   facebookConnectCallback,
+  instagramConnectStart,
+  instagramConnectCallback,
   xConnectStart,
   xConnectCallback,
   xErrorDiagnostic,
