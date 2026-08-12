@@ -60,13 +60,13 @@ const getXErrorRedirect = (returnTo, error) => {
 
 // GET /api/v1/social-accounts/x/connect?workspaceId=&userId=
 const xConnectStart = (req, res) => {
-  const { workspaceId, userId, returnTo } = req.query;
+  const { workspaceId, userId, returnTo, connectMode = "manage" } = req.query;
   if (!workspaceId || !userId) {
     throw ApiError.badRequest("workspaceId and userId are required to start the X connection.");
   }
   const frontendUrl = typeof returnTo === "string" ? trimTrailingSlash(returnTo) : "";
   const safeReturnTo = getAllowedOrigins().has(frontendUrl) ? frontendUrl : getFrontendUrl();
-  return res.redirect(createXAuthorizationUrl({ workspaceId, userId, returnTo: safeReturnTo }));
+  return res.redirect(createXAuthorizationUrl({ workspaceId, userId, returnTo: safeReturnTo, connectMode: connectMode === "dataset" ? "dataset" : "manage" }));
 };
 
 // GET /api/v1/social-accounts/x/callback
@@ -115,7 +115,7 @@ const xConnectCallback = asyncHandler(async (req, res) => {
         tokenIssuedAt: new Date(),
         tokenExpiresAt: new Date(Date.now() + (tokens.expires_in || 7200) * 1000),
         status: "connected",
-        connectSource: "manage",
+        connectSource: stateData.connectMode === "dataset" ? "dataset" : "manage",
         lastSyncedAt: new Date(),
         lastTokenRefreshAttemptAt: null,
         lastTokenRefreshError: null,
@@ -146,14 +146,14 @@ const xErrorDiagnostic = (req, res) => {
 
 // GET /api/v1/social-accounts/instagram/connect?workspaceId=&userId=&returnTo=
 const instagramConnectStart = (req, res) => {
-  const { workspaceId, userId, returnTo } = req.query;
+  const { workspaceId, userId, returnTo, connectMode = "manage" } = req.query;
   if (!workspaceId || !userId) {
     throw ApiError.badRequest("workspaceId and userId are required to start the Instagram connection.");
   }
 
   const frontendUrl = typeof returnTo === "string" ? trimTrailingSlash(returnTo) : "";
   const safeReturnTo = getAllowedOrigins().has(frontendUrl) ? frontendUrl : getFrontendUrl();
-  const state = encodeURIComponent(JSON.stringify({ workspaceId, userId, returnTo: safeReturnTo, nonce: crypto.randomUUID() }));
+  const state = encodeURIComponent(JSON.stringify({ workspaceId, userId, returnTo: safeReturnTo, connectMode: connectMode === "dataset" ? "dataset" : "manage", nonce: crypto.randomUUID() }));
   const scopes = ["instagram_basic", "instagram_content_publish", "pages_show_list", "pages_read_engagement", "business_management"];
   const url =
     `https://www.facebook.com/${FB_GRAPH_VERSION}/dialog/oauth` +
@@ -249,7 +249,7 @@ const instagramConnectCallback = asyncHandler(async (req, res) => {
           tokenIssuedAt,
           tokenExpiresAt,
           status: "connected",
-          connectSource: "manage",
+          connectSource: parsed.connectMode === "dataset" ? "dataset" : "manage",
           lastSyncedAt: new Date(),
           lastTokenRefreshAttemptAt: null,
           lastTokenRefreshError: null,
@@ -268,14 +268,14 @@ const instagramConnectCallback = asyncHandler(async (req, res) => {
 
 // GET /api/v1/social-accounts/linkedin/connect?workspaceId=&userId=&returnTo=
 const linkedInConnectStart = (req, res) => {
-  const { workspaceId, userId, returnTo } = req.query;
+  const { workspaceId, userId, returnTo, connectMode = "manage" } = req.query;
   const clientId = getEnv("LINKEDIN_CLIENT_ID");
   if (!workspaceId || !userId) throw ApiError.badRequest("workspaceId and userId are required to start the LinkedIn connection.");
   if (!clientId) throw ApiError.badRequest("LinkedIn OAuth is not configured.");
 
   const frontendUrl = typeof returnTo === "string" ? trimTrailingSlash(returnTo) : "";
   const safeReturnTo = getAllowedOrigins().has(frontendUrl) ? frontendUrl : getFrontendUrl();
-  const state = encodeURIComponent(JSON.stringify({ workspaceId, userId, returnTo: safeReturnTo, nonce: crypto.randomUUID() }));
+  const state = encodeURIComponent(JSON.stringify({ workspaceId, userId, returnTo: safeReturnTo, connectMode: connectMode === "dataset" ? "dataset" : "manage", nonce: crypto.randomUUID() }));
   const params = new URLSearchParams({
     response_type: "code",
     client_id: clientId,
@@ -333,7 +333,7 @@ const linkedInConnectCallback = asyncHandler(async (req, res) => {
         tokenIssuedAt: new Date(),
         tokenExpiresAt: new Date(Date.now() + (tokens.expires_in || 5184000) * 1000),
         status: "connected",
-        connectSource: "manage",
+        connectSource: parsed.connectMode === "dataset" ? "dataset" : "manage",
         lastSyncedAt: new Date(),
         lastTokenRefreshAttemptAt: null,
         lastTokenRefreshError: null,

@@ -1,7 +1,10 @@
 import ConnectedPage from "../models/connectedPage.model.js";
 import PagePost from "../models/pagePost.model.js";
 import BulkPost from "../models/bulkPost.model.js";
+import Post from "../models/post.model.js";
+import SocialAccount from "../models/socialAccount.model.js";
 import { executeBulkPublish } from "../utils/bulkFacebookPublish.js";
+import { executePublish } from "../utils/publishPost.js";
 import asyncHandler from "../utils/asyncHandler.js";
 import ApiError from "../utils/apiError.js";
 import ApiResponse from "../utils/apiResponse.js";
@@ -43,21 +46,46 @@ const listConnectedPages = asyncHandler(async (req, res) => {
 
 // POST /api/v1/connected-pages/bulk-post
 const createBulkPost = asyncHandler(async (req, res) => {
-  const { workspaceId, secretKey, content, fromPage, toPage, category, postType, scheduledAt, mediaId } =
+  const { workspaceId, secretKey, content, fromPage, toPage, category, postType, scheduledAt, mediaId, targetType = "dataset", socialAccountIds } =
     req.body;
 
-  if (!workspaceId || !secretKey?.trim() || !content?.trim()) {
-    throw ApiError.badRequest("workspaceId, secretKey, and content are required.");
-  }
-
-  const from = Number(fromPage);
-  const to = Number(toPage);
-  if (Number.isNaN(from) || Number.isNaN(to) || from < 1 || to < from) {
-    throw ApiError.badRequest("Invalid page number range.");
+  if (!workspaceId || !content?.trim()) {
+    throw ApiError.badRequest("workspaceId and content are required.");
   }
 
   const parsedScheduledAt = scheduledAt ? new Date(scheduledAt) : null;
   const isScheduled = parsedScheduledAt && parsedScheduledAt.getTime() > Date.now() + 30_000;
+
+  if (targetType === "accounts") {
+    if (!Array.isArray(socialAccountIds) || socialAccountIds.length === 0) {
+      throw ApiError.badRequest("Select at least one connected account.");
+    }
+    const accounts = await SocialAccount.find({
+      _id: { $in: socialAccountIds },
+      workspace: workspaceId,
+      status: "connected",
+    }).select("_id platform");
+    if (!accounts.length) throw ApiError.badRequest("Selected connected accounts were not found.");
+
+    const post = await Post.create({
+      workspace: workspaceId,
+      createdBy: req.user._id,
+      type: mediaId ? (postType === "video" ? "video" : "image") : "text",
+      content,
+      platforms: [...new Set(accounts.map((account) => account.platform))],
+      media: mediaId ? [mediaId] : [],
+      socialAccounts: accounts.map((account) => account._id),
+      scheduledAt: isScheduled ? parsedScheduledAt : undefined,
+      status: isScheduled ? "scheduled" : "draft",
+    });
+    if (!isScheduled) await executePublish(post);
+    return new ApiResponse(201, isScheduled ? "Account bulk post scheduled successfully." : "Account bulk post published successfully.", post).send(res);
+  }
+
+  if (!secretKey?.trim()) throw ApiError.badRequest("secretKey is required for trending dataset posts.");
+  const from = Number(fromPage);
+  const to = Number(toPage);
+  if (Number.isNaN(from) || Number.isNaN(to) || from < 1 || to < from) throw ApiError.badRequest("Invalid page number range.");
 
   if (isScheduled) {
     const bulkPost = await BulkPost.create({

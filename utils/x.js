@@ -30,10 +30,10 @@ const createCodeVerifier = () => crypto.randomBytes(48).toString("base64url");
 const createCodeChallenge = (verifier) => crypto.createHash("sha256").update(verifier).digest("base64url");
 const buildXPostLink = (username, postId) => (username && postId ? `https://x.com/${username.replace(/^@/, "")}/status/${postId}` : null);
 
-const createXAuthorizationUrl = ({ workspaceId, userId, returnTo }) => {
+const createXAuthorizationUrl = ({ workspaceId, userId, returnTo, connectMode = "manage" }) => {
   const { clientId, callbackUrl } = getXConfig();
   const codeVerifier = createCodeVerifier();
-  const state = jwt.sign({ workspaceId, userId, returnTo, codeVerifier }, getJwtSecret(), { expiresIn: "10m" });
+  const state = jwt.sign({ workspaceId, userId, returnTo, connectMode, codeVerifier }, getJwtSecret(), { expiresIn: "10m" });
 
   const params = new URLSearchParams({
     response_type: "code",

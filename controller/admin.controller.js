@@ -577,7 +577,7 @@ const getSocialAccountsOverview = asyncHandler(async (req, res) => {
   const { search, status } = req.query;
 
   // Manage = SocialAccounts connected via "manage" only (dataset dual-write excluded)
-  const manageFilter = { platform: "facebook", connectSource: { $ne: "dataset" } };
+  const manageFilter = { connectSource: { $ne: "dataset" } };
   const datasetFilter = {};
 
   if (status) {
