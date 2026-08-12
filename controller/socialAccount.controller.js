@@ -574,11 +574,11 @@ const listAccounts = asyncHandler(async (req, res) => {
     ),
   ]);
 
-  // Older Facebook connections may have been saved without an avatar. Fetch the
-  // Page picture once with its encrypted page token, then persist it for later requests.
+  // Facebook CDN image URLs can expire. Resolve a fresh Page picture through the
+  // Graph API before returning connected accounts to the browser.
   await Promise.all(
     accounts
-      .filter((account) => account.platform === "facebook" && !account.avatar && account.accessToken)
+      .filter((account) => account.platform === "facebook" && account.accessToken)
       .map(async (account) => {
         try {
           const { data } = await axios.get(`https://graph.facebook.com/${FB_GRAPH_VERSION}/${account.accountId}/picture`, {
