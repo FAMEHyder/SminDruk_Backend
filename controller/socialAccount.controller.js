@@ -35,6 +35,9 @@ const getFacebookRedirectUri = () => `${getApiUrl()}/api/v1/social-accounts/face
 const getInstagramRedirectUri = () =>
   getEnv("INSTAGRAM_CALLBACK_URI", "INSTAGRAM_CALLBACK_URL") ||
   `${getApiUrl()}/api/v1/social-accounts/instagram/callback`;
+const getLinkedInRedirectUri = () =>
+  getEnv("LINKEDIN_CALLBACK_URI", "LINKEDIN_CALLBACK_URL", "LINKEDIN_REDIRECT_URI") ||
+  `${getApiUrl()}/api/v1/social-accounts/linkedin/callback`;
 
 const getXErrorDetails = (error) => {
   const data = error?.response?.data;
@@ -260,6 +263,88 @@ const instagramConnectCallback = asyncHandler(async (req, res) => {
     const reason = connectError.response?.data?.error?.message || connectError.message;
     logger.error(`Instagram connect callback failed: ${reason}`);
     return res.redirect(`${returnTo}/dashboard/connect-channels?ig=error&reason=${encodeURIComponent(reason)}`);
+  }
+});
+
+// GET /api/v1/social-accounts/linkedin/connect?workspaceId=&userId=&returnTo=
+const linkedInConnectStart = (req, res) => {
+  const { workspaceId, userId, returnTo } = req.query;
+  const clientId = getEnv("LINKEDIN_CLIENT_ID");
+  if (!workspaceId || !userId) throw ApiError.badRequest("workspaceId and userId are required to start the LinkedIn connection.");
+  if (!clientId) throw ApiError.badRequest("LinkedIn OAuth is not configured.");
+
+  const frontendUrl = typeof returnTo === "string" ? trimTrailingSlash(returnTo) : "";
+  const safeReturnTo = getAllowedOrigins().has(frontendUrl) ? frontendUrl : getFrontendUrl();
+  const state = encodeURIComponent(JSON.stringify({ workspaceId, userId, returnTo: safeReturnTo, nonce: crypto.randomUUID() }));
+  const params = new URLSearchParams({
+    response_type: "code",
+    client_id: clientId,
+    redirect_uri: getLinkedInRedirectUri(),
+    scope: "openid profile email w_member_social",
+    state,
+  });
+  return res.redirect(`https://www.linkedin.com/oauth/v2/authorization?${params.toString()}`);
+};
+
+// GET /api/v1/social-accounts/linkedin/callback
+const linkedInConnectCallback = asyncHandler(async (req, res) => {
+  const { code, state, error } = req.query;
+  let returnTo = getFrontendUrl();
+  if (error || !code || !state) {
+    const reason = typeof req.query.error_description === "string" ? req.query.error_description : "LinkedIn authorization was cancelled.";
+    return res.redirect(`${returnTo}/dashboard/connect-channels?linkedin=error&reason=${encodeURIComponent(reason)}`);
+  }
+
+  try {
+    const parsed = JSON.parse(decodeURIComponent(state));
+    const requestedReturnTo = trimTrailingSlash(parsed.returnTo);
+    returnTo = getAllowedOrigins().has(requestedReturnTo) ? requestedReturnTo : returnTo;
+    const clientId = getEnv("LINKEDIN_CLIENT_ID");
+    const clientSecret = getEnv("LINKEDIN_CLIENT_SECRET");
+    if (!clientId || !clientSecret) throw new Error("LinkedIn OAuth is not configured.");
+
+    const tokenBody = new URLSearchParams({
+      grant_type: "authorization_code",
+      code: String(code),
+      redirect_uri: getLinkedInRedirectUri(),
+      client_id: clientId,
+      client_secret: clientSecret,
+    });
+    const { data: tokens } = await axios.post("https://www.linkedin.com/oauth/v2/accessToken", tokenBody.toString(), {
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    });
+    const { data: profile } = await axios.get("https://api.linkedin.com/v2/userinfo", {
+      headers: { Authorization: `Bearer ${tokens.access_token}` },
+    });
+    if (!profile?.sub) throw new Error("LinkedIn did not return an account profile.");
+
+    await SocialAccount.findOneAndUpdate(
+      { workspace: parsed.workspaceId, platform: "linkedin", accountId: profile.sub },
+      {
+        workspace: parsed.workspaceId,
+        connectedBy: parsed.userId,
+        platform: "linkedin",
+        accountId: profile.sub,
+        accountName: profile.name || [profile.given_name, profile.family_name].filter(Boolean).join(" ") || "LinkedIn account",
+        username: profile.email || "",
+        avatar: profile.picture || "",
+        accessToken: encrypt(tokens.access_token),
+        refreshToken: tokens.refresh_token ? encrypt(tokens.refresh_token) : undefined,
+        tokenIssuedAt: new Date(),
+        tokenExpiresAt: new Date(Date.now() + (tokens.expires_in || 5184000) * 1000),
+        status: "connected",
+        connectSource: "manage",
+        lastSyncedAt: new Date(),
+        lastTokenRefreshAttemptAt: null,
+        lastTokenRefreshError: null,
+      },
+      { upsert: true, new: true }
+    );
+    return res.redirect(`${returnTo}/dashboard/connect-channels?linkedin=connected`);
+  } catch (connectError) {
+    const reason = connectError.response?.data?.error_description || connectError.response?.data?.message || connectError.message;
+    logger.error(`LinkedIn connect callback failed: ${reason}`);
+    return res.redirect(`${returnTo}/dashboard/connect-channels?linkedin=error&reason=${encodeURIComponent(reason)}`);
   }
 });
 
@@ -628,6 +713,8 @@ export {
   facebookConnectCallback,
   instagramConnectStart,
   instagramConnectCallback,
+  linkedInConnectStart,
+  linkedInConnectCallback,
   xConnectStart,
   xConnectCallback,
   xErrorDiagnostic,

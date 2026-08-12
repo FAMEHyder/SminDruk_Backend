@@ -1,6 +1,7 @@
 import Post from "../models/post.model.js";
 import { publishPostToFacebookPages } from "./facebookPublish.js";
 import { publishPostToInstagramAccounts } from "./instagramPublish.js";
+import { publishPostToLinkedInAccounts } from "./linkedinPublish.js";
 import { publishPostToXAccounts } from "./xPublish.js";
 
 /**
@@ -48,6 +49,20 @@ const executePublish = async (post) => {
     }
   }
 
+  if (post.platforms.includes("linkedin")) {
+    const { results } = await publishPostToLinkedInAccounts(post);
+    for (const result of results) {
+      if (result.success && result.postId) {
+        post.platformPostIds.set(`linkedin_${result.accountId}`, result.postId);
+      } else if (!result.success) {
+        failures.push(`${result.accountName}: ${result.error}`);
+      }
+    }
+    if (results.length > 0 && results.every((result) => !result.success)) {
+      throw new Error(failures[0] || "LinkedIn publish failed for all selected accounts.");
+    }
+  }
+
   if (post.platforms.includes("x")) {
     const { results } = await publishPostToXAccounts(post);
     for (const result of results) {
@@ -62,7 +77,7 @@ const executePublish = async (post) => {
     }
   }
 
-  const unsupported = post.platforms.filter((platform) => !["facebook", "instagram", "x"].includes(platform));
+  const unsupported = post.platforms.filter((platform) => !["facebook", "instagram", "linkedin", "x"].includes(platform));
   if (unsupported.length > 0) {
     failures.push(`Not yet supported: ${unsupported.join(", ")}`);
   }

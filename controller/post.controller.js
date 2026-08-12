@@ -37,7 +37,7 @@ const createPost = asyncHandler(async (req, res) => {
 
   if (
     resolvedStatus === "scheduled" &&
-    (platforms.includes("facebook") || platforms.includes("instagram") || platforms.includes("x")) &&
+    (platforms.includes("facebook") || platforms.includes("instagram") || platforms.includes("linkedin") || platforms.includes("x")) &&
     (!socialAccountIds || socialAccountIds.length === 0)
   ) {
     throw ApiError.badRequest("Select at least one connected account for scheduled posts.");
@@ -343,7 +343,7 @@ const publishPostNow = asyncHandler(async (req, res) => {
 
 
   if (
-    (post.platforms.includes("facebook") || post.platforms.includes("x")) &&
+    (post.platforms.includes("facebook") || post.platforms.includes("instagram") || post.platforms.includes("linkedin") || post.platforms.includes("x")) &&
     (!post.socialAccounts || post.socialAccounts.length === 0)
   ) {
     throw ApiError.badRequest("Select at least one connected account before publishing.");
