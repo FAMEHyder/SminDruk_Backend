@@ -1,4 +1,5 @@
 import axios from "axios";
+import Media from "../models/media.model.js";
 import PagePost from "../models/pagePost.model.js";
 import SocialAccount from "../models/socialAccount.model.js";
 import { decrypt } from "./encrypt.js";
@@ -7,11 +8,40 @@ import logger from "./logger.js";
 const LINKEDIN_API_URL = "https://api.linkedin.com/rest/posts";
 const LINKEDIN_VERSION = "202607";
 const buildLinkedInPostLink = (postId) => `https://www.linkedin.com/feed/update/${decodeURIComponent(postId)}`;
+const linkedInHeaders = (token) => ({
+  Authorization: `Bearer ${token}`,
+  "Linkedin-Version": LINKEDIN_VERSION,
+  "X-Restli-Protocol-Version": "2.0.0",
+  "Content-Type": "application/json",
+});
+
+const uploadImageToLinkedIn = async ({ accountId, token, media }) => {
+  if (media.fileType !== "image") throw new Error("LinkedIn video publishing is not enabled yet. Select an image or publish text-only.");
+
+  const { data: initialized } = await axios.post(
+    "https://api.linkedin.com/rest/images?action=initializeUpload",
+    { initializeUploadRequest: { owner: `urn:li:person:${accountId}` } },
+    { headers: linkedInHeaders(token) }
+  );
+  const uploadUrl = initialized?.value?.uploadUrl;
+  const imageUrn = initialized?.value?.image;
+  if (!uploadUrl || !imageUrn) throw new Error("LinkedIn did not return an image upload URL.");
+
+  const download = await axios.get(media.url, { responseType: "arraybuffer" });
+  await axios.put(uploadUrl, Buffer.from(download.data), {
+    headers: { "Content-Type": media.mimeType || download.headers["content-type"] || "image/jpeg" },
+    maxBodyLength: Infinity,
+    maxContentLength: Infinity,
+  });
+  return imageUrn;
+};
 
 const publishPostToLinkedInAccounts = async (post) => {
   const accountIds = post.socialAccounts?.map((id) => String(id?._id || id)).filter(Boolean) || [];
   if (!accountIds.length) throw new Error("Select at least one LinkedIn account for this post.");
-  if (post.media?.length) throw new Error("LinkedIn media publishing is not enabled for this app yet. Publish text-only posts to LinkedIn.");
+  let media = post.media;
+  if (media?.length && !media[0]?.url) media = await Media.find({ _id: { $in: post.media } });
+  if (media?.length > 1) throw new Error("LinkedIn currently supports one image per post in SminDruk.");
 
   const accounts = await SocialAccount.find({
     _id: { $in: accountIds },
@@ -25,6 +55,7 @@ const publishPostToLinkedInAccounts = async (post) => {
   for (const account of accounts) {
     try {
       const token = decrypt(account.accessToken);
+      const imageUrn = media?.length ? await uploadImageToLinkedIn({ accountId: account.accountId, token, media: media[0] }) : null;
       const { headers } = await axios.post(
         LINKEDIN_API_URL,
         {
@@ -38,14 +69,10 @@ const publishPostToLinkedInAccounts = async (post) => {
           },
           lifecycleState: "PUBLISHED",
           isReshareDisabledByAuthor: false,
+          ...(imageUrn ? { content: { media: { id: imageUrn, title: media[0].fileName || "Image" } } } : {}),
         },
         {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Linkedin-Version": LINKEDIN_VERSION,
-            "X-Restli-Protocol-Version": "2.0.0",
-            "Content-Type": "application/json",
-          },
+          headers: linkedInHeaders(token),
         }
       );
       const postId = headers["x-restli-id"] || headers["x-linkedin-id"];
