@@ -119,20 +119,28 @@ const getPostStats = asyncHandler(async (req, res) => {
 
   const workspaceObjectId = new mongoose.Types.ObjectId(workspaceId);
 
-  const [statusRows, liveLinks] = await Promise.all([
+  const [statusRows, liveLinkRows] = await Promise.all([
     Post.aggregate([
       { $match: { workspace: workspaceObjectId } },
       { $group: { _id: "$status", n: { $sum: 1 } } },
     ]),
-    PagePost.countDocuments({
-      workspace: workspaceId,
-      success: true,
-      postLink: { $exists: true, $nin: [null, ""] },
-    }),
+    PagePost.aggregate([
+      {
+        $match: {
+          workspace: workspaceObjectId,
+          success: true,
+          postLink: { $exists: true, $nin: [null, ""] },
+        },
+      },
+      { $group: { _id: "$platform", count: { $sum: 1 } } },
+    ]),
   ]);
 
   const byStatus = Object.fromEntries(statusRows.map((row) => [row._id, row.n]));
   const total = statusRows.reduce((sum, row) => sum + row.n, 0);
+
+  const liveLinksByPlatform = Object.fromEntries(liveLinkRows.map((row) => [row._id || "facebook", row.count]));
+  const liveLinks = liveLinkRows.reduce((sum, row) => sum + row.count, 0);
 
   return new ApiResponse(200, "Post stats fetched successfully.", {
     total,
@@ -141,6 +149,7 @@ const getPostStats = asyncHandler(async (req, res) => {
     drafts: byStatus.draft || 0,
     failed: byStatus.failed || 0,
     liveLinks,
+    liveLinksByPlatform,
   }).send(res);
 });
 
