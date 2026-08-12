@@ -151,7 +151,7 @@ const instagramConnectStart = (req, res) => {
   const frontendUrl = typeof returnTo === "string" ? trimTrailingSlash(returnTo) : "";
   const safeReturnTo = getAllowedOrigins().has(frontendUrl) ? frontendUrl : getFrontendUrl();
   const state = encodeURIComponent(JSON.stringify({ workspaceId, userId, returnTo: safeReturnTo, nonce: crypto.randomUUID() }));
-  const scopes = ["instagram_basic", "instagram_content_publish", "pages_show_list", "pages_read_engagement"];
+  const scopes = ["instagram_basic", "instagram_content_publish", "pages_show_list", "pages_read_engagement", "business_management"];
   const url =
     `https://www.facebook.com/${FB_GRAPH_VERSION}/dialog/oauth` +
     `?client_id=${process.env.FB_APP_ID}` +
@@ -198,11 +198,26 @@ const instagramConnectCallback = asyncHandler(async (req, res) => {
     const pagesRes = await axios.get(`https://graph.facebook.com/${FB_GRAPH_VERSION}/me/accounts`, {
       params: {
         access_token: longUserToken,
-        fields: "id,access_token,instagram_business_account{id,username,name,profile_picture_url,followers_count}",
+        fields: "id,access_token",
       },
     });
 
-    const accounts = (pagesRes.data.data || []).filter((page) => page.instagram_business_account?.id && page.access_token);
+    const pages = pagesRes.data.data || [];
+    const accounts = (
+      await Promise.all(
+        pages
+          .filter((page) => page.id && page.access_token)
+          .map(async (page) => {
+            const { data } = await axios.get(`https://graph.facebook.com/${FB_GRAPH_VERSION}/${page.id}`, {
+              params: {
+                access_token: page.access_token,
+                fields: "instagram_business_account{id,username,name,profile_picture_url,followers_count}",
+              },
+            });
+            return { ...page, instagram_business_account: data.instagram_business_account };
+          })
+      )
+    ).filter((page) => page.instagram_business_account?.id);
     if (!accounts.length) {
       return res.redirect(
         `${returnTo}/dashboard/connect-channels?ig=error&reason=${encodeURIComponent(
