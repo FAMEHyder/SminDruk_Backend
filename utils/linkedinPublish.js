@@ -5,7 +5,7 @@ import { decrypt } from "./encrypt.js";
 import logger from "./logger.js";
 
 const LINKEDIN_API_URL = "https://api.linkedin.com/rest/posts";
-const LINKEDIN_VERSION = "202501";
+const LINKEDIN_VERSION = "202607";
 const buildLinkedInPostLink = (postId) => `https://www.linkedin.com/feed/update/${decodeURIComponent(postId)}`;
 
 const publishPostToLinkedInAccounts = async (post) => {
