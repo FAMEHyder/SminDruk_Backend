@@ -16,12 +16,14 @@ import __route_payment_routes from "./payment.routes.js";
 import __route_subscription_routes from "./subscription.routes.js";
 import __route_admin_routes from "./admin.routes.js";
 import __route_chatbot_routes from "./chatbot.routes.js";
-import { xConnectCallback } from "../controller/socialAccount.controller.js";
+import { linkedInConnectCallback, xConnectCallback } from "../controller/socialAccount.controller.js";
 
 const router = express.Router();
 
 // X Developer Portal callback configured as /api/v1/auth/callback/x.
 router.get("/auth/callback/x", xConnectCallback);
+// LinkedIn Developer Portal callback configured as /api/v1/auth/callback/linkedin.
+router.get("/auth/callback/linkedin", linkedInConnectCallback);
 router.use("/auth", __route_auth_routes);
 router.use("/users", __route_user_routes);
 router.use("/workspaces", __route_workspace_routes);
