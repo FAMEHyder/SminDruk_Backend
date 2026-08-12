@@ -1,4 +1,4 @@
-import { encrypt } from "../utils/encrypt.js";
+import { decrypt, encrypt } from "../utils/encrypt.js";
 import { refreshFacebookTokensForAccount, runFacebookTokenRefreshJob } from "../utils/facebookTokenRefresh.js";
 import { getAllowedOrigins, getApiUrl, getEnv, getFrontendUrl, trimTrailingSlash } from "../utils/env.js";
 import axios from "axios";
@@ -468,11 +468,32 @@ const listAccounts = asyncHandler(async (req, res) => {
   if (!workspaceId) throw ApiError.badRequest("workspaceId is required.");
 
   const [accounts, datasetPages] = await Promise.all([
-    SocialAccount.find({ workspace: workspaceId }).select("-accessToken -refreshToken -userAccessToken"),
+    SocialAccount.find({ workspace: workspaceId }).select("+accessToken -refreshToken -userAccessToken"),
     ConnectedPage.find({ workspace: workspaceId, status: "connected" }).select(
       "pageId pageName profilePicture category status lastSyncedAt createdAt updatedAt workspace connectedBy"
     ),
   ]);
+
+  // Older Facebook connections may have been saved without an avatar. Fetch the
+  // Page picture once with its encrypted page token, then persist it for later requests.
+  await Promise.all(
+    accounts
+      .filter((account) => account.platform === "facebook" && !account.avatar && account.accessToken)
+      .map(async (account) => {
+        try {
+          const { data } = await axios.get(`https://graph.facebook.com/${FB_GRAPH_VERSION}/${account.accountId}/picture`, {
+            params: { access_token: decrypt(account.accessToken), redirect: false, type: "large" },
+          });
+          const avatar = data?.data?.url;
+          if (avatar) {
+            account.avatar = avatar;
+            await account.save();
+          }
+        } catch (error) {
+          logger.warn(`Could not fetch Facebook Page picture for ${account.accountName}: ${error.message}`);
+        }
+      })
+  );
 
   const accountPageIds = new Set(accounts.map((a) => a.accountId));
 
@@ -496,7 +517,15 @@ const listAccounts = asyncHandler(async (req, res) => {
       source: "connectedPage",
     }));
 
-  return new ApiResponse(200, "Social accounts fetched successfully.", [...accounts, ...datasetOnly]).send(res);
+  const safeAccounts = accounts.map((account) => {
+    const safeAccount = account.toObject();
+    delete safeAccount.accessToken;
+    delete safeAccount.refreshToken;
+    delete safeAccount.userAccessToken;
+    return safeAccount;
+  });
+
+  return new ApiResponse(200, "Social accounts fetched successfully.", [...safeAccounts, ...datasetOnly]).send(res);
 });
 
 // DELETE /api/v1/social-accounts/:id
