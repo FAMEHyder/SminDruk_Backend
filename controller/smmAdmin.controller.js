@@ -7,6 +7,7 @@ import SmmService from "../models/smmService.model.js";
 import SmmOrder from "../models/smmOrder.model.js";
 import Wallet from "../models/wallet.model.js";
 import WalletTransaction from "../models/walletTransaction.model.js";
+import { getSmmProviderAdapter } from "../utils/smmProviderAdapter.js";
 
 const pageMeta = (page = 1, limit = 20) => {
   const safeLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
@@ -175,7 +176,55 @@ const getOverview = asyncHandler(async (_req, res) => {
   }).send(res);
 });
 
+const syncProviderServices = asyncHandler(async (_req, res) => {
+  const adapter = getSmmProviderAdapter();
+  const providerServices = await adapter.getServices();
+  if (!Array.isArray(providerServices)) throw ApiError.badRequest("Provider returned an invalid service catalog.");
+
+  const categories = new Map();
+  let imported = 0;
+  for (const item of providerServices) {
+    const categoryName = String(item.category || "Other").trim() || "Other";
+    let category = categories.get(categoryName);
+    if (!category) {
+      const slug = toSlug(categoryName);
+      category = await SmmCategory.findOneAndUpdate(
+        { slug },
+        { $setOnInsert: { name: categoryName, slug, platform: "other", isActive: false } },
+        { new: true, upsert: true }
+      );
+      categories.set(categoryName, category);
+    }
+
+    const providerServiceId = String(item.service);
+    await SmmService.findOneAndUpdate(
+      { providerName: "smmzio", providerServiceId },
+      {
+        $set: {
+          category: category._id,
+          name: String(item.name || `Provider service ${providerServiceId}`),
+          description: String(item.description || ""),
+          platform: category.platform || "other",
+          minQuantity: Math.max(Number(item.min) || 1, 1),
+          maxQuantity: Math.max(Number(item.max) || 1, Number(item.min) || 1),
+          ratePerThousand: Math.max(Number(item.rate) || 0, 0),
+          currency: "USD",
+          refillSupported: Boolean(item.refill),
+          cancelSupported: Boolean(item.cancel),
+          providerName: "smmzio",
+          providerServiceId,
+          isActive: false,
+        },
+        $setOnInsert: { slug: `smmzio-${providerServiceId}` },
+      },
+      { new: true, upsert: true, runValidators: true }
+    );
+    imported += 1;
+  }
+  return new ApiResponse(200, "Provider services imported as disabled drafts. Review and enable them before customers can order.", { imported }).send(res);
+});
+
 export {
   createCategory, createService, creditWallet, deleteCategory, deleteService,
-  getOverview, listCategories, listOrders, listServices, updateCategory, updateOrderStatus, updateService,
+  getOverview, listCategories, listOrders, listServices, syncProviderServices, updateCategory, updateOrderStatus, updateService,
 };

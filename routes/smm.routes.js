@@ -18,6 +18,10 @@ router.get("/wallet", requireWorkspaceMember, smmController.getWalletSummary);
 router.get("/wallet/transactions", requireWorkspaceMember, smmController.listWalletTransactions);
 router.get("/orders", requireWorkspaceMember, smmController.listOrders);
 router.get("/orders/:id", requireWorkspaceMember, smmController.getOrder);
+router.get("/refills", requireWorkspaceMember, smmController.listRefills);
+router.post("/refills", requireWorkspaceMember, authorizeWorkspaceRole("owner", "admin", "editor"), smmController.createRefill);
+router.get("/support", requireWorkspaceMember, smmController.listSupportTickets);
+router.post("/support", requireWorkspaceMember, smmController.createSupportTicket);
 router.post(
   "/orders",
   validate(smmValidators.createOrder),

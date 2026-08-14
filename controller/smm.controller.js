@@ -9,6 +9,9 @@ import SmmService from "../models/smmService.model.js";
 import SmmOrder from "../models/smmOrder.model.js";
 import Wallet from "../models/wallet.model.js";
 import WalletTransaction from "../models/walletTransaction.model.js";
+import SmmRefill from "../models/smmRefill.model.js";
+import SmmSupportTicket from "../models/smmSupportTicket.model.js";
+import { getSmmProviderAdapter } from "../utils/smmProviderAdapter.js";
 
 const pageMeta = (page = 1, limit = 20) => {
   const safeLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
@@ -17,6 +20,9 @@ const pageMeta = (page = 1, limit = 20) => {
 };
 
 const ensureMarketplaceEnabled = async () => {
+  if (process.env.SMM_MODULE_ENABLED?.trim().toLowerCase() === "false") {
+    throw ApiError.forbidden("The SMM marketplace is currently unavailable.");
+  }
   const settings = await PlatformSettings.findOne({ key: "default" }).lean();
   if (settings?.featureFlags?.smmMarketplaceEnabled === false) {
     throw ApiError.forbidden("The SMM marketplace is currently unavailable.");
@@ -162,6 +168,30 @@ const createOrder = asyncHandler(async (req, res) => {
     await session.endSession();
   }
 
+  if (service.providerName === "smmzio" && service.providerServiceId) {
+    try {
+      const result = await getSmmProviderAdapter().createOrder({
+        service: service.providerServiceId,
+        link,
+        quantity,
+      });
+      if (!result?.order) throw new Error("Provider did not return an order id.");
+      order = await SmmOrder.findByIdAndUpdate(
+        order._id,
+        { status: "processing", providerOrderId: String(result.order), providerPayload: { submittedAt: new Date() } },
+        { new: true }
+      );
+    } catch (error) {
+      // The funded local order is kept pending for a controlled retry after the
+      // provider is available. Credentials and raw provider responses are not exposed.
+      order = await SmmOrder.findByIdAndUpdate(
+        order._id,
+        { failureReason: "Provider submission is pending retry." },
+        { new: true }
+      );
+    }
+  }
+
   return new ApiResponse(201, "SMM order placed successfully.", order).send(res);
 });
 
@@ -193,6 +223,48 @@ const getDashboard = asyncHandler(async (req, res) => {
   }).send(res);
 });
 
+const listRefills = asyncHandler(async (req, res) => {
+  await ensureMarketplaceEnabled();
+  const refills = await SmmRefill.find({ workspace: req.workspaceId })
+    .populate({ path: "order", populate: { path: "service", select: "name platform" } })
+    .sort({ createdAt: -1 })
+    .lean();
+  return new ApiResponse(200, "SMM refills fetched successfully.", refills).send(res);
+});
+
+const createRefill = asyncHandler(async (req, res) => {
+  await ensureMarketplaceEnabled();
+  const order = await SmmOrder.findOne({ _id: req.body.orderId, workspace: req.workspaceId })
+    .populate("service", "refillSupported");
+  if (!order) throw ApiError.notFound("SMM order not found.");
+  if (order.status !== "completed" || !order.service?.refillSupported) {
+    throw ApiError.badRequest("This order is not eligible for a refill.");
+  }
+  const existing = await SmmRefill.findOne({ order: order._id, status: { $in: ["pending", "processing"] } });
+  if (existing) throw ApiError.conflict("A refill request is already active for this order.");
+  const refill = await SmmRefill.create({ workspace: req.workspaceId, order: order._id, requestedBy: req.user._id });
+  return new ApiResponse(201, "Refill requested successfully.", refill).send(res);
+});
+
+const listSupportTickets = asyncHandler(async (req, res) => {
+  await ensureMarketplaceEnabled();
+  const tickets = await SmmSupportTicket.find({ workspace: req.workspaceId, createdBy: req.user._id })
+    .sort({ createdAt: -1 })
+    .lean();
+  return new ApiResponse(200, "SMM support tickets fetched successfully.", tickets).send(res);
+});
+
+const createSupportTicket = asyncHandler(async (req, res) => {
+  await ensureMarketplaceEnabled();
+  const ticket = await SmmSupportTicket.create({
+    workspace: req.workspaceId,
+    createdBy: req.user._id,
+    subject: req.body.subject,
+    message: req.body.message,
+  });
+  return new ApiResponse(201, "SMM support ticket created successfully.", ticket).send(res);
+});
+
 export {
   createOrder,
   getDashboard,
@@ -203,4 +275,8 @@ export {
   listOrders,
   listServices,
   listWalletTransactions,
+  listRefills,
+  createRefill,
+  listSupportTickets,
+  createSupportTicket,
 };
