@@ -1,6 +1,7 @@
 import { authenticate, isAdmin } from "../middleware/auth.middleware.js";
 import express from "express";
 import * as adminController from "../controller/admin.controller.js";
+import * as smmAdminController from "../controller/smmAdmin.controller.js";
 
 const router = express.Router();
 
@@ -46,6 +47,20 @@ router.patch("/subscriptions/:id", adminController.updateSubscriptionAdmin);
 
 // Payments
 router.get("/payments", adminController.managePayments);
+
+// SMM marketplace (provider sync remains intentionally separate)
+router.get("/smm/overview", smmAdminController.getOverview);
+router.get("/smm/categories", smmAdminController.listCategories);
+router.post("/smm/categories", smmAdminController.createCategory);
+router.patch("/smm/categories/:id", smmAdminController.updateCategory);
+router.delete("/smm/categories/:id", smmAdminController.deleteCategory);
+router.get("/smm/services", smmAdminController.listServices);
+router.post("/smm/services", smmAdminController.createService);
+router.patch("/smm/services/:id", smmAdminController.updateService);
+router.delete("/smm/services/:id", smmAdminController.deleteService);
+router.get("/smm/orders", smmAdminController.listOrders);
+router.patch("/smm/orders/:id/status", smmAdminController.updateOrderStatus);
+router.post("/smm/wallet/credit", smmAdminController.creditWallet);
 
 // AI
 router.get("/ai", adminController.getAiOverview);

@@ -129,9 +129,19 @@ const contactValidators = {
   }),
 };
 
+const smmValidators = {
+  createOrder: z.object({
+    workspaceId: z.string().min(1),
+    serviceId: z.string().min(1),
+    link: z.string().url("A valid target link is required.").max(2048),
+    quantity: z.number().int().positive(),
+  }),
+};
+
 export { authValidators,
   userValidators,
   workspaceValidators,
   postValidators,
   aiValidators,
-  contactValidators, };
+  contactValidators,
+  smmValidators, };

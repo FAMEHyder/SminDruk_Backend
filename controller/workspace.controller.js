@@ -5,6 +5,7 @@ import Workspace from "../models/workspace.model.js";
 import TeamMember from "../models/teamMember.model.js";
 import User from "../models/user.model.js";
 import Subscription from "../models/subscription.model.js";
+import Wallet from "../models/wallet.model.js";
 
 const slugify = (name) =>
   `${name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-")}-${Math.random().toString(36).slice(2, 7)}`;
@@ -29,6 +30,7 @@ const createWorkspace = asyncHandler(async (req, res) => {
   });
 
   await Subscription.create({ workspace: workspace._id, plan: "free" });
+  await Wallet.create({ workspace: workspace._id, balance: 0, currency: "USD" });
 
   req.user.activeWorkspace = workspace._id;
   await req.user.save();
