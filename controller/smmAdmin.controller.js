@@ -96,6 +96,7 @@ const listServices = asyncHandler(async (req, res) => {
   const filter = {};
   if (req.query.categoryId) filter.category = req.query.categoryId;
   if (req.query.platform) filter.platform = req.query.platform;
+  if (req.query.provider) filter.providerName = req.query.provider;
   if (req.query.status === "active") filter.isActive = true;
   if (req.query.status === "inactive") filter.isActive = false;
   if (req.query.search) filter.$or = [{ name: new RegExp(String(req.query.search), "i") }, { description: new RegExp(String(req.query.search), "i") }];
