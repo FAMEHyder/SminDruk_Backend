@@ -28,8 +28,8 @@ class DummySmmProviderAdapter extends SmmProviderAdapter {
 class SmmZioProviderAdapter extends SmmProviderAdapter {
   constructor() {
     super();
-    this.apiKey = process.env.SMMZIO_API_KEY || process.env.SMMZIO_KEY;
-    this.baseUrl = (process.env.SMMZIO_API_URL || "https://smmzio.com/api/v2").replace(/\/+$/, "");
+    this.apiKey = (process.env.SMMZIO_API_KEY || process.env.SMMZIO_KEY || "").trim();
+    this.baseUrl = (process.env.SMMZIO_API_URL || "https://smmzio.com/api/v2").trim().replace(/\/+$/, "");
     this.timeout = Number(process.env.SMM_PROVIDER_TIMEOUT_MS || 20_000);
   }
 
