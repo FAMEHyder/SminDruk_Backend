@@ -213,7 +213,30 @@ const syncPakProviderServices = asyncHandler(async (_req, res) => {
   return new ApiResponse(200, "Pak services imported as disabled drafts. Review and enable them before customers can order.", result).send(res);
 });
 
+const getProviderBalances = asyncHandler(async (_req, res) => {
+  const providers = [
+    { id: "smmzio", name: "SMMZIO" },
+    { id: "paksmmcheap", name: "Pak SMM Cheap" },
+  ];
+  const balances = await Promise.all(
+    providers.map(async (provider) => {
+      try {
+        const balance = await getProviderAdapter(provider.id).getBalance();
+        return {
+          ...provider,
+          available: Number(balance?.balance ?? balance?.available ?? 0),
+          currency: balance?.currency || "USD",
+          connected: true,
+        };
+      } catch {
+        return { ...provider, available: 0, currency: "USD", connected: false };
+      }
+    })
+  );
+  return new ApiResponse(200, "Provider balances fetched successfully.", balances).send(res);
+});
+
 export {
   createCategory, createService, creditWallet, deleteCategory, deleteService,
-  getOverview, listCategories, listOrders, listServices, syncPakProviderServices, syncProviderServices, updateCategory, updateOrderStatus, updateService,
+  getOverview, getProviderBalances, listCategories, listOrders, listServices, syncPakProviderServices, syncProviderServices, updateCategory, updateOrderStatus, updateService,
 };

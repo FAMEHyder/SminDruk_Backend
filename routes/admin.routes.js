@@ -50,6 +50,7 @@ router.get("/payments", adminController.managePayments);
 
 // SMM marketplace (provider sync remains intentionally separate)
 router.get("/smm/overview", smmAdminController.getOverview);
+router.get("/smm/providers/balances", smmAdminController.getProviderBalances);
 router.get("/smm/categories", smmAdminController.listCategories);
 router.post("/smm/categories", smmAdminController.createCategory);
 router.patch("/smm/categories/:id", smmAdminController.updateCategory);
