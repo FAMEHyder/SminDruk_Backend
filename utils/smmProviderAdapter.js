@@ -64,7 +64,10 @@ class SmmZioProviderAdapter extends SmmProviderAdapter {
 }
 
 const getSmmProviderAdapter = () => {
-  if ((process.env.SMM_PROVIDER_MODE || "").trim().toLowerCase() === "smmzio") {
+  if (
+    (process.env.SMM_PROVIDER_MODE || "").trim().toLowerCase() === "smmzio" ||
+    Boolean(process.env.SMMZIO_API_KEY || process.env.SMMZIO_KEY)
+  ) {
     return new SmmZioProviderAdapter();
   }
   return new DummySmmProviderAdapter();
