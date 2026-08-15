@@ -39,13 +39,19 @@ class SmmZioProviderAdapter extends SmmProviderAdapter {
 
   async request(action, payload = {}) {
     this.ensureConfigured();
-    const { data } = await axios.post(
-      this.baseUrl,
-      new URLSearchParams({ key: this.apiKey, action, ...Object.fromEntries(Object.entries(payload).map(([key, value]) => [key, String(value)])) }),
-      { timeout: this.timeout, headers: { "Content-Type": "application/x-www-form-urlencoded" } }
-    );
-    if (data?.error) throw new Error(String(data.error));
-    return data;
+    try {
+      const { data } = await axios.post(
+        this.baseUrl,
+        new URLSearchParams({ key: this.apiKey, action, ...Object.fromEntries(Object.entries(payload).map(([key, value]) => [key, String(value)])) }),
+        { timeout: this.timeout, headers: { "Content-Type": "application/x-www-form-urlencoded" } }
+      );
+      if (data?.error) throw new Error(String(data.error));
+      return data;
+    } catch (error) {
+      const status = error?.response?.status;
+      const providerError = error?.response?.data?.error || error?.response?.data?.message;
+      throw new Error(providerError || (status ? `Provider request failed with HTTP ${status}.` : error.message));
+    }
   }
 
   getServices() { return this.request("services"); }
