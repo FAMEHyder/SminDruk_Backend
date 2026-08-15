@@ -3,7 +3,7 @@ import mongoose from "mongoose";
 const smmServiceSchema = new mongoose.Schema(
   {
     category: { type: mongoose.Schema.Types.ObjectId, ref: "SmmCategory", required: true },
-    name: { type: String, required: true, trim: true, maxlength: 180 },
+    name: { type: String, required: true, trim: true, maxlength: 500 },
     slug: { type: String, required: true, unique: true, lowercase: true, trim: true },
     description: { type: String, default: "", maxlength: 2000 },
     platform: { type: String, required: true, trim: true, lowercase: true },
