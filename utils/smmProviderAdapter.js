@@ -63,6 +63,18 @@ class SmmZioProviderAdapter extends SmmProviderAdapter {
   cancelOrder(order) { return this.request("cancel", { orders: order }); }
 }
 
+class PakSmmCheapProviderAdapter extends SmmZioProviderAdapter {
+  constructor() {
+    super();
+    this.apiKey = (process.env.PAKET_API_KEY || process.env.PAKSMMCHEAP_API_KEY || "").trim();
+    this.baseUrl = (process.env.PAKET_API_URL || process.env.PAKSMMCHEAP_API_URL || "https://paksmmcheap.com/api/v2").trim().replace(/\/+$/, "");
+  }
+
+  ensureConfigured() {
+    if (!this.apiKey) throw new Error("PAKET_API_KEY is not configured.");
+  }
+}
+
 const getSmmProviderAdapter = () => {
   if (
     (process.env.SMM_PROVIDER_MODE || "").trim().toLowerCase() === "smmzio" ||
@@ -73,4 +85,17 @@ const getSmmProviderAdapter = () => {
   return new DummySmmProviderAdapter();
 };
 
-export { SmmProviderAdapter, DummySmmProviderAdapter, SmmZioProviderAdapter, getSmmProviderAdapter };
+const getProviderAdapter = (provider) => {
+  if (provider === "smmzio") return new SmmZioProviderAdapter();
+  if (provider === "paksmmcheap") return new PakSmmCheapProviderAdapter();
+  return new DummySmmProviderAdapter();
+};
+
+export {
+  SmmProviderAdapter,
+  DummySmmProviderAdapter,
+  SmmZioProviderAdapter,
+  PakSmmCheapProviderAdapter,
+  getSmmProviderAdapter,
+  getProviderAdapter,
+};

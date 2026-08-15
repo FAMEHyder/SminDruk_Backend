@@ -59,6 +59,7 @@ router.post("/smm/services", smmAdminController.createService);
 router.patch("/smm/services/:id", smmAdminController.updateService);
 router.delete("/smm/services/:id", smmAdminController.deleteService);
 router.post("/smm/providers/smmzio/sync-services", smmAdminController.syncProviderServices);
+router.post("/smm/providers/paksmmcheap/sync-services", smmAdminController.syncPakProviderServices);
 router.get("/smm/orders", smmAdminController.listOrders);
 router.patch("/smm/orders/:id/status", smmAdminController.updateOrderStatus);
 router.post("/smm/wallet/credit", smmAdminController.creditWallet);
