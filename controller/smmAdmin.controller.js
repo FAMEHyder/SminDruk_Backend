@@ -30,6 +30,22 @@ const calculateCustomerRate = (providerCost, markupType = "percentage", markupVa
     ).toFixed(6)
   );
 
+const inferPlatform = (value) => {
+  const text = String(value || "").toLowerCase();
+  if (text.includes("instagram") || text.includes(" ig ")) return "instagram";
+  if (text.includes("facebook") || text.includes(" fb ")) return "facebook";
+  if (text.includes("twitter") || text.includes(" x ")) return "x";
+  if (text.includes("linkedin")) return "linkedin";
+  if (text.includes("tiktok") || text.includes("tik tok")) return "tiktok";
+  if (text.includes("youtube") || text.includes(" yt ")) return "youtube";
+  if (text.includes("pinterest")) return "pinterest";
+  if (text.includes("threads")) return "threads";
+  if (text.includes("telegram")) return "telegram";
+  if (text.includes("whatsapp")) return "whatsapp";
+  if (text.includes("spotify")) return "spotify";
+  return "other";
+};
+
 const importProviderServices = async (providerName) => {
   const providerServices = await getProviderAdapter(providerName).getServices();
   if (!Array.isArray(providerServices)) throw ApiError.badRequest("Provider returned an invalid service catalog.");
@@ -49,9 +65,10 @@ const importProviderServices = async (providerName) => {
     const providerServiceId = String(item.service);
     const providerCostPerThousand = Math.max(Number(item.rate) || 0, 0);
     const markupValue = Math.max(Number(process.env.SMM_DEFAULT_MARKUP_PERCENT || 20), 0);
+    const platform = inferPlatform(`${categoryName} ${item.name || ""}`);
     await SmmService.findOneAndUpdate(
       { providerName, providerServiceId },
-      { $set: { category: category._id, name: String(item.name || `Provider service ${providerServiceId}`), description: String(item.description || ""), platform: "other", minQuantity: Math.max(Number(item.min) || 1, 1), maxQuantity: Math.max(Number(item.max) || 1, Number(item.min) || 1), providerCostPerThousand, markupType: "percentage", markupValue, ratePerThousand: calculateCustomerRate(providerCostPerThousand, "percentage", markupValue), currency: "USD", refillSupported: Boolean(item.refill), cancelSupported: Boolean(item.cancel), providerName, providerServiceId, isActive: false }, $setOnInsert: { slug: `${providerName}-${providerServiceId}` } },
+      { $set: { category: category._id, name: String(item.name || `Provider service ${providerServiceId}`), description: String(item.description || ""), platform, minQuantity: Math.max(Number(item.min) || 1, 1), maxQuantity: Math.max(Number(item.max) || 1, Number(item.min) || 1), providerCostPerThousand, markupType: "percentage", markupValue, ratePerThousand: calculateCustomerRate(providerCostPerThousand, "percentage", markupValue), currency: "USD", refillSupported: Boolean(item.refill), cancelSupported: Boolean(item.cancel), providerName, providerServiceId }, $setOnInsert: { slug: `${providerName}-${providerServiceId}`, isActive: false } },
       { new: true, upsert: true, runValidators: true }
     );
   }
