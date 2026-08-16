@@ -51,6 +51,7 @@ const listServices = asyncHandler(async (req, res) => {
   if (search) filter.$or = [{ name: new RegExp(String(search), "i") }, { description: new RegExp(String(search), "i") }];
 
   const services = await SmmService.find(filter)
+    .select("-providerCostPerThousand -markupType -markupValue -providerName -providerServiceId")
     .populate("category", "name slug platform")
     .sort({ sortOrder: 1, name: 1 })
     .lean();
@@ -60,6 +61,7 @@ const listServices = asyncHandler(async (req, res) => {
 const getService = asyncHandler(async (req, res) => {
   await ensureMarketplaceEnabled();
   const service = await SmmService.findOne({ _id: req.params.id, isActive: true })
+    .select("-providerCostPerThousand -markupType -markupValue -providerName -providerServiceId")
     .populate("category", "name slug platform")
     .lean();
   if (!service) throw ApiError.notFound("SMM service not found.");
@@ -122,6 +124,8 @@ const createOrder = asyncHandler(async (req, res) => {
   }
 
   const charge = Number(((quantity / 1000) * service.ratePerThousand).toFixed(4));
+  const providerCost = Number(((quantity / 1000) * (service.providerCostPerThousand ?? service.ratePerThousand)).toFixed(4));
+  const commission = Number((charge - providerCost).toFixed(4));
   const session = await mongoose.startSession();
   let order;
   try {
@@ -143,6 +147,8 @@ const createOrder = asyncHandler(async (req, res) => {
           link,
           quantity,
           charge,
+          providerCost,
+          commission,
           currency: service.currency,
         }],
         { session }

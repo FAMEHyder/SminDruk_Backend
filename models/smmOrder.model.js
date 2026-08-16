@@ -9,6 +9,8 @@ const smmOrderSchema = new mongoose.Schema(
     link: { type: String, required: true, trim: true, maxlength: 2048 },
     quantity: { type: Number, required: true, min: 1 },
     charge: { type: Number, required: true, min: 0 },
+    providerCost: { type: Number, required: true, min: 0, select: false },
+    commission: { type: Number, required: true, min: 0, select: false },
     currency: { type: String, required: true, uppercase: true },
     status: {
       type: String,

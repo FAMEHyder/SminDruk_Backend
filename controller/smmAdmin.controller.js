@@ -22,6 +22,14 @@ const toSlug = (value) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
 
+const calculateCustomerRate = (providerCost, markupType = "percentage", markupValue = 20) =>
+  Number(
+    (markupType === "fixed"
+      ? providerCost + markupValue
+      : providerCost * (1 + markupValue / 100)
+    ).toFixed(6)
+  );
+
 const importProviderServices = async (providerName) => {
   const providerServices = await getProviderAdapter(providerName).getServices();
   if (!Array.isArray(providerServices)) throw ApiError.badRequest("Provider returned an invalid service catalog.");
@@ -39,9 +47,11 @@ const importProviderServices = async (providerName) => {
       categories.set(categoryName, category);
     }
     const providerServiceId = String(item.service);
+    const providerCostPerThousand = Math.max(Number(item.rate) || 0, 0);
+    const markupValue = Math.max(Number(process.env.SMM_DEFAULT_MARKUP_PERCENT || 20), 0);
     await SmmService.findOneAndUpdate(
       { providerName, providerServiceId },
-      { $set: { category: category._id, name: String(item.name || `Provider service ${providerServiceId}`), description: String(item.description || ""), platform: "other", minQuantity: Math.max(Number(item.min) || 1, 1), maxQuantity: Math.max(Number(item.max) || 1, Number(item.min) || 1), ratePerThousand: Math.max(Number(item.rate) || 0, 0), currency: "USD", refillSupported: Boolean(item.refill), cancelSupported: Boolean(item.cancel), providerName, providerServiceId, isActive: false }, $setOnInsert: { slug: `${providerName}-${providerServiceId}` } },
+      { $set: { category: category._id, name: String(item.name || `Provider service ${providerServiceId}`), description: String(item.description || ""), platform: "other", minQuantity: Math.max(Number(item.min) || 1, 1), maxQuantity: Math.max(Number(item.max) || 1, Number(item.min) || 1), providerCostPerThousand, markupType: "percentage", markupValue, ratePerThousand: calculateCustomerRate(providerCostPerThousand, "percentage", markupValue), currency: "USD", refillSupported: Boolean(item.refill), cancelSupported: Boolean(item.cancel), providerName, providerServiceId, isActive: false }, $setOnInsert: { slug: `${providerName}-${providerServiceId}` } },
       { new: true, upsert: true, runValidators: true }
     );
   }
@@ -120,8 +130,15 @@ const updateService = asyncHandler(async (req, res) => {
   if (data.maxQuantity !== undefined && data.minQuantity !== undefined && data.maxQuantity < data.minQuantity) {
     throw ApiError.badRequest("Maximum quantity must be greater than minimum quantity.");
   }
+  const current = await SmmService.findById(req.params.id);
+  if (!current) throw ApiError.notFound("SMM service not found.");
+  const providerCost = data.providerCostPerThousand ?? current.providerCostPerThousand;
+  const markupType = data.markupType ?? current.markupType;
+  const markupValue = data.markupValue ?? current.markupValue;
+  if (providerCost !== undefined || data.markupType !== undefined || data.markupValue !== undefined) {
+    data.ratePerThousand = calculateCustomerRate(providerCost, markupType, markupValue);
+  }
   const service = await SmmService.findByIdAndUpdate(req.params.id, data, { new: true, runValidators: true });
-  if (!service) throw ApiError.notFound("SMM service not found.");
   return new ApiResponse(200, "SMM service updated successfully.", service).send(res);
 });
 
