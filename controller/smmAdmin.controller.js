@@ -31,7 +31,10 @@ const calculateCustomerRate = (providerCost, markupType = "percentage", markupVa
   );
 
 const inferPlatform = (value) => {
-  const text = String(value || "").toLowerCase();
+  const text = String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
   if (text.includes("instagram") || text.includes(" ig ")) return "instagram";
   if (text.includes("facebook") || text.includes(" fb ")) return "facebook";
   if (text.includes("twitter") || text.includes(" x ")) return "x";
@@ -43,6 +46,7 @@ const inferPlatform = (value) => {
   if (text.includes("telegram")) return "telegram";
   if (text.includes("whatsapp")) return "whatsapp";
   if (text.includes("spotify")) return "spotify";
+  if (text.includes("website") || text.includes("web traffic")) return "website";
   return "other";
 };
 
@@ -248,6 +252,7 @@ const syncPakProviderServices = asyncHandler(async (_req, res) => {
 });
 
 const getProviderBalances = asyncHandler(async (_req, res) => {
+  const lowBalanceThreshold = Math.max(Number(process.env.SMM_PROVIDER_LOW_BALANCE_THRESHOLD || 5000), 0);
   const providers = [
     { id: "smmzio", name: "SMMZIO" },
     { id: "paksmmcheap", name: "Pak SMM Cheap" },
@@ -261,9 +266,11 @@ const getProviderBalances = asyncHandler(async (_req, res) => {
           available: Number(balance?.balance ?? balance?.available ?? 0),
           currency: balance?.currency || "USD",
           connected: true,
+          lowBalanceThreshold,
+          lowBalance: Number(balance?.balance ?? balance?.available ?? 0) < lowBalanceThreshold,
         };
       } catch {
-        return { ...provider, available: 0, currency: "USD", connected: false };
+        return { ...provider, available: 0, currency: "USD", connected: false, lowBalanceThreshold, lowBalance: true };
       }
     })
   );

@@ -11,7 +11,7 @@ import Wallet from "../models/wallet.model.js";
 import WalletTransaction from "../models/walletTransaction.model.js";
 import SmmRefill from "../models/smmRefill.model.js";
 import SmmSupportTicket from "../models/smmSupportTicket.model.js";
-import { getSmmProviderAdapter } from "../utils/smmProviderAdapter.js";
+import { getProviderAdapter } from "../utils/smmProviderAdapter.js";
 
 const pageMeta = (page = 1, limit = 20) => {
   const safeLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
@@ -126,6 +126,23 @@ const createOrder = asyncHandler(async (req, res) => {
   const charge = Number(((quantity / 1000) * service.ratePerThousand).toFixed(4));
   const providerCost = Number(((quantity / 1000) * (service.providerCostPerThousand ?? service.ratePerThousand)).toFixed(4));
   const commission = Number((charge - providerCost).toFixed(4));
+  const providerConfigured = Boolean(service.providerName && service.providerServiceId);
+
+  // Provider wallets are separate from customer wallets. Confirm the upstream
+  // balance first so customer funds are never debited for an order that cannot
+  // be submitted to its selected provider.
+  if (providerConfigured) {
+    try {
+      const providerBalance = await getProviderAdapter(service.providerName).getBalance();
+      const available = Number(providerBalance?.balance ?? providerBalance?.available ?? 0);
+      if (!Number.isFinite(available) || available < providerCost) {
+        throw ApiError.badRequest("This service is temporarily unavailable because the provider balance is low.");
+      }
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw ApiError.badRequest("This service is temporarily unavailable because the provider cannot be reached.");
+    }
+  }
   const session = await mongoose.startSession();
   let order;
   try {
@@ -174,9 +191,9 @@ const createOrder = asyncHandler(async (req, res) => {
     await session.endSession();
   }
 
-  if (service.providerName === "smmzio" && service.providerServiceId) {
+  if (providerConfigured) {
     try {
-      const result = await getSmmProviderAdapter().createOrder({
+      const result = await getProviderAdapter(service.providerName).createOrder({
         service: service.providerServiceId,
         link,
         quantity,
