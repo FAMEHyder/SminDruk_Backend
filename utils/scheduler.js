@@ -210,7 +210,9 @@ const startScheduler = () => {
   });
 
   const cronTimezone = process.env.CRON_TIMEZONE || "Asia/Karachi";
-  const tokenRefreshCron = process.env.FB_TOKEN_REFRESH_CRON || "0 12 * * *";
+  // Refresh multiple times a day during the safe 45–60 day Meta-token window.
+  // This prevents a Railway deploy/outage at one daily run from causing expiry.
+  const tokenRefreshCron = process.env.FB_TOKEN_REFRESH_CRON || "0 */6 * * *";
 
   cron.schedule(
     tokenRefreshCron,
@@ -226,13 +228,19 @@ const startScheduler = () => {
   );
 
   logger.info("Post scheduler started (running every minute).");
-  logger.info(`Facebook and X token refresh scheduled daily at 12:00 PM (${cronTimezone}).`);
+  logger.info(`Facebook and X token refresh scheduled: ${tokenRefreshCron} (${cronTimezone}).`);
 
   runScheduledPostsJob().catch((error) =>
     logger.error(`Initial scheduler run failed: ${error.message}`)
   );
   runScheduledBulkPostsJob().catch((error) =>
     logger.error(`Initial bulk scheduler run failed: ${error.message}`)
+  );
+  runFacebookTokenRefreshJob().catch((error) =>
+    logger.error(`Initial Facebook token refresh check failed: ${error.message}`)
+  );
+  runXTokenRefreshJob().catch((error) =>
+    logger.error(`Initial X token refresh check failed: ${error.message}`)
   );
 };
 
