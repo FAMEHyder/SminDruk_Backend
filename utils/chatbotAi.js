@@ -55,7 +55,7 @@ const getClient = () => {
   return client;
 };
 
-const getModel = () => process.env.GROQ_MODEL?.trim() || "llama-3.3-70b-versatile";
+const getModel = () => process.env.GROQ_MODEL?.trim() || "llama-3.1-8b-instant";
 
 /**
  * @param {Array<{role: string, content: string}>} messages
