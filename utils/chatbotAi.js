@@ -55,7 +55,9 @@ const getClient = () => {
   return client;
 };
 
-const getModel = () => process.env.GROQ_MODEL?.trim() || "llama-3.1-8b-instant";
+// llama-3.1-8b-instant has been retired from Groq. Keep this aligned with
+// the supported model used by the existing caption-AI client.
+const getModel = () => process.env.GROQ_MODEL?.trim() || "llama-3.3-70b-versatile";
 
 /**
  * @param {Array<{role: string, content: string}>} messages
