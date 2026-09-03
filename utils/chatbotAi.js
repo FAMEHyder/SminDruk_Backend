@@ -55,9 +55,14 @@ const getClient = () => {
   return client;
 };
 
-// llama-3.1-8b-instant has been retired from Groq. Keep this aligned with
-// the supported model used by the existing caption-AI client.
-const getModel = () => process.env.GROQ_MODEL?.trim() || "llama-3.3-70b-versatile";
+// llama-3.1-8b-instant has been retired from Groq. Map legacy Railway/local
+// configuration to the configured supported chatbot model.
+const getModel = () => {
+  const configuredModel = process.env.GROQ_MODEL?.trim();
+  return configuredModel === "llama-3.1-8b-instant"
+    ? "openai/gpt-oss-20b"
+    : configuredModel || "openai/gpt-oss-20b";
+};
 
 /**
  * @param {Array<{role: string, content: string}>} messages
