@@ -9,7 +9,7 @@ const workspaceSchema = new mongoose.Schema(
     owner: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     plan: {
       type: String,
-      enum: ["free", "starter", "professional", "agency", "enterprise"],
+      enum: ["free", "basic", "standard", "premium", "starter", "professional", "agency", "enterprise"],
       default: "free",
     },
     isActive: { type: Boolean, default: true },

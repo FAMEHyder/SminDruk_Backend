@@ -17,12 +17,47 @@ import PagePost from "../models/pagePost.model.js";
 import BulkPost from "../models/bulkPost.model.js";
 
 import Notification from "../models/notification.model.js";
+import Subscription from "../models/subscription.model.js";
+import { getPlan, UNLIMITED } from "../utils/subscriptionPlans.js";
 
 
 
 // POST /api/v1/posts
 const createPost = asyncHandler(async (req, res) => {
   const { workspaceId, type, content, platforms, mediaIds, socialAccountIds, scheduledAt, status } = req.body;
+  const subscription = await Subscription.findOne({ workspace: workspaceId });
+  if (!subscription) throw ApiError.badRequest("A subscription is required before creating posts.");
+
+  if (subscription.status === "trialing" && subscription.trialEndsAt && subscription.trialEndsAt <= new Date()) {
+    subscription.status = "expired";
+    subscription.plan = "free";
+    await subscription.save();
+  }
+
+  if (subscription.status === "expired" || subscription.status === "cancelled") {
+    throw ApiError.forbidden("Your plan has expired. Choose a plan to continue creating posts.");
+  }
+  if (subscription.status === "trialing" && platforms.includes("x")) {
+    throw ApiError.forbidden("X publishing is not included in the 30-day free trial. Choose a paid plan to publish to X.");
+  }
+
+  const plan = getPlan(subscription.plan);
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+  for (const platform of platforms) {
+    const limit = plan.platformPostLimits?.[platform] ?? 0;
+    if (limit === UNLIMITED) continue;
+    const used = await Post.countDocuments({
+      workspace: workspaceId,
+      platforms: platform,
+      createdAt: { $gte: monthStart },
+      status: { $ne: "failed" },
+    });
+    if (used >= limit) {
+      throw ApiError.forbidden(`${platform} monthly post limit reached for your ${plan.name} plan. Upgrade to continue.`);
+    }
+  }
 
   const parsedScheduledAt = scheduledAt ? new Date(scheduledAt) : undefined;
   if (scheduledAt && Number.isNaN(parsedScheduledAt.getTime())) {
@@ -54,6 +89,8 @@ const createPost = asyncHandler(async (req, res) => {
     scheduledAt: parsedScheduledAt,
     status: resolvedStatus,
   });
+  subscription.usage.postsThisMonth = (subscription.usage.postsThisMonth || 0) + 1;
+  await subscription.save();
 
   return new ApiResponse(201, "Post created successfully.", post).send(res);
 });

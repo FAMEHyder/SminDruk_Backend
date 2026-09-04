@@ -928,6 +928,58 @@ const managePayments = asyncHandler(async (req, res) => {
   }).send(res);
 });
 
+const reviewManualPayment = asyncHandler(async (req, res) => {
+  const { decision, reviewNote = "" } = req.body;
+  if (!["approve", "reject"].includes(decision)) {
+    throw ApiError.badRequest("Decision must be approve or reject.");
+  }
+
+  const payment = await Payment.findOne({
+    _id: req.params.id,
+    gateway: "manual",
+    status: "pending",
+  });
+  if (!payment) throw ApiError.notFound("Pending manual payment not found.");
+
+  payment.status = decision === "approve" ? "succeeded" : "failed";
+  payment.reviewedBy = req.user._id;
+  payment.reviewedAt = new Date();
+  payment.reviewNote = String(reviewNote).trim().slice(0, 1000);
+  await payment.save();
+
+  if (decision === "approve") {
+    const periodEnd = new Date();
+    periodEnd.setMonth(periodEnd.getMonth() + 1);
+    const subscription = await Subscription.findOneAndUpdate(
+      { workspace: payment.workspace },
+      {
+        plan: payment.plan,
+        status: "active",
+        startedAt: new Date(),
+        currentPeriodEnd: periodEnd,
+        limits: PLAN_LIMITS[payment.plan],
+      },
+      { new: true, upsert: true }
+    );
+    await Workspace.findByIdAndUpdate(payment.workspace, { plan: payment.plan });
+    payment.subscription = subscription._id;
+    await payment.save();
+  }
+
+  await AuditLog.create({
+    user: req.user._id,
+    event: `manual_payment_${decision}d`,
+    description: `Manual ${payment.plan} payment ${decision}d`,
+    metadata: { paymentId: payment._id, workspaceId: payment.workspace, reviewNote: payment.reviewNote },
+  });
+
+  return new ApiResponse(
+    200,
+    decision === "approve" ? "Payment approved and subscription activated." : "Payment rejected.",
+    payment
+  ).send(res);
+});
+
 // ─── AI ──────────────────────────────────────────────────────
 
 const getAiOverview = asyncHandler(async (_req, res) => {
@@ -1303,6 +1355,7 @@ export {
   manageSubscriptions,
   updateSubscriptionAdmin,
   managePayments,
+  reviewManualPayment,
   getAiOverview,
   manageMedia,
   deleteMediaAdmin,

@@ -47,6 +47,7 @@ router.patch("/subscriptions/:id", adminController.updateSubscriptionAdmin);
 
 // Payments
 router.get("/payments", adminController.managePayments);
+router.patch("/payments/:id/review", adminController.reviewManualPayment);
 
 // SMM marketplace (provider sync remains intentionally separate)
 router.get("/smm/overview", smmAdminController.getOverview);

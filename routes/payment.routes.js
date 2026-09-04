@@ -1,4 +1,5 @@
 import { authenticate } from "../middleware/auth.middleware.js";
+import { authorizeWorkspaceRole, requireWorkspaceMember } from "../middleware/workspace.middleware.js";
 import express from "express";
 import * as paymentController from "../controller/payment.controller.js";
 
@@ -11,6 +12,13 @@ router.post("/webhook/paypal", paymentController.paypalWebhook);
 router.use(authenticate);
 router.post("/checkout", paymentController.createCheckoutSession);
 router.post("/verify", paymentController.verifyPayment);
-router.get("/history", paymentController.getPaymentHistory);
+router.get("/methods", paymentController.getManualPaymentMethods);
+router.get("/history", requireWorkspaceMember, paymentController.getPaymentHistory);
+router.post(
+  "/manual",
+  requireWorkspaceMember,
+  authorizeWorkspaceRole("owner", "admin"),
+  paymentController.submitManualPayment
+);
 
 export default router;

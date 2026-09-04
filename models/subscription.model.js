@@ -5,7 +5,7 @@ const subscriptionSchema = new mongoose.Schema(
     workspace: { type: mongoose.Schema.Types.ObjectId, ref: "Workspace", required: true },
     plan: {
       type: String,
-      enum: ["free", "starter", "professional", "agency", "enterprise"],
+      enum: ["free", "basic", "standard", "premium", "starter", "professional", "agency", "enterprise"],
       default: "free",
     },
     billingCycle: {
@@ -15,11 +15,14 @@ const subscriptionSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["active", "past_due", "cancelled", "expired"],
+      enum: ["trialing", "pending_payment", "active", "past_due", "cancelled", "expired"],
       default: "active",
     },
     startedAt: { type: Date, default: Date.now },
     currentPeriodEnd: { type: Date },
+    trialStartedAt: { type: Date },
+    trialEndsAt: { type: Date },
+    trialUsed: { type: Boolean, default: false },
     cancelAtPeriodEnd: { type: Boolean, default: false },
     limits: {
       socialAccounts: { type: Number, default: 3 },

@@ -5,11 +5,15 @@ const IV_LENGTH = 16;
 
 /**
  * Candidate secrets for encrypt/decrypt.
- * Tries ENCRYPTION_KEY first, then JWT_SECRET — tokens may have been
- * encrypted with whichever was available at connect time.
+ * Tries the active key, then historical keys. This lets existing social
+ * tokens survive an intentional encryption-key rotation.
  */
 const resolveSecrets = () => {
-  const secrets = [process.env.ENCRYPTION_KEY, process.env.JWT_SECRET]
+  const legacySecrets = (process.env.ENCRYPTION_KEY_PREVIOUS || process.env.TOKEN_ENCRYPTION_LEGACY_KEYS || "")
+    .split(",")
+    .map((value) => value.trim());
+
+  const secrets = [process.env.ENCRYPTION_KEY, process.env.JWT_SECRET, ...legacySecrets]
     .map((value) => (typeof value === "string" ? value.trim() : ""))
     .filter(Boolean);
   return [...new Set(secrets)];
@@ -52,8 +56,8 @@ const decryptWithSecret = (payload, secret) => {
 
 /**
  * Decrypts a string previously produced by `encrypt()`.
- * Tries every available secret so scheduled publish does not fail when
- * ENCRYPTION_KEY / JWT_SECRET differed between connect and publish.
+ * Tries every configured active or legacy secret so scheduled publishing and
+ * manual token refresh survive a configured key rotation.
  * Plaintext tokens (legacy / unencrypted) are returned as-is.
  */
 export const decrypt = (payload) => {
