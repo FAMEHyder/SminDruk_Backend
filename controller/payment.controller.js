@@ -69,13 +69,13 @@ const getManualPaymentMethods = asyncHandler(async (_req, res) => {
     {
       id: "easypaisa",
       label: "Easypaisa",
-      accountTitle: process.env.SUBSCRIPTION_EASYPAISA_ACCOUNT_NAME || "",
+      accountTitle: process.env.SUBSCRIPTION_EASYPAISA_ACCOUNT_TITLE || "",
       accountNumber: process.env.SUBSCRIPTION_EASYPAISA_ACCOUNT_NUMBER || "",
     },
     {
       id: "jazzcash",
       label: "JazzCash",
-      accountTitle: process.env.SUBSCRIPTION_JAZZCASH_ACCOUNT_NAME || "",
+      accountTitle: process.env.SUBSCRIPTION_JAZZCASH_ACCOUNT_TITLE || "",
       accountNumber: process.env.SUBSCRIPTION_JAZZCASH_ACCOUNT_NUMBER || "",
     },
   ].filter((method) => enabled.has(method.id) && method.accountNumber);

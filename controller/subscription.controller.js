@@ -21,7 +21,10 @@ const ensureCurrentSubscription = async (workspaceId) => {
   const subscription = await Subscription.findOne({ workspace: workspaceId });
   if (!subscription) throw ApiError.notFound("Subscription not found for this workspace.");
 
-  if (subscription.status === "trialing" && subscription.trialEndsAt && subscription.trialEndsAt <= new Date()) {
+  const isTrialExpired = subscription.status === "trialing" && subscription.trialEndsAt && subscription.trialEndsAt <= new Date();
+  const isPaidPeriodExpired =
+    subscription.status === "active" && subscription.currentPeriodEnd && subscription.currentPeriodEnd <= new Date();
+  if (isTrialExpired || isPaidPeriodExpired) {
     subscription.status = "expired";
     subscription.plan = "free";
     subscription.limits = limitsForPlan("free");
@@ -81,6 +84,9 @@ const startTrial = asyncHandler(async (req, res) => {
 const upgradePlan = asyncHandler(async (req, res) => {
   const { plan, billingCycle } = req.body;
   if (!MANAGEMENT_PLANS[plan] && !PLAN_LIMITS[plan]) throw ApiError.badRequest("Invalid subscription plan.");
+  if (plan !== "free") {
+    throw ApiError.forbidden("Paid plans activate only after an approved payment.");
+  }
 
   const subscription = await Subscription.findOneAndUpdate(
     { workspace: req.params.workspaceId },

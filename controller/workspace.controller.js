@@ -6,6 +6,7 @@ import TeamMember from "../models/teamMember.model.js";
 import User from "../models/user.model.js";
 import Subscription from "../models/subscription.model.js";
 import Wallet from "../models/wallet.model.js";
+import { getPlan } from "../utils/subscriptionPlans.js";
 
 const slugify = (name) =>
   `${name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-")}-${Math.random().toString(36).slice(2, 7)}`;
@@ -19,6 +20,7 @@ const createWorkspace = asyncHandler(async (req, res) => {
     description,
     slug: slugify(name),
     owner: req.user._id,
+    plan: "basic",
   });
 
   await TeamMember.create({
@@ -29,7 +31,19 @@ const createWorkspace = asyncHandler(async (req, res) => {
     joinedAt: new Date(),
   });
 
-  await Subscription.create({ workspace: workspace._id, plan: "free" });
+  const trialStartedAt = new Date();
+  const trialEndsAt = new Date(trialStartedAt.getTime() + 30 * 24 * 60 * 60 * 1000);
+  await Subscription.create({
+    workspace: workspace._id,
+    plan: "basic",
+    status: "trialing",
+    startedAt: trialStartedAt,
+    trialStartedAt,
+    trialEndsAt,
+    trialUsed: true,
+    currentPeriodEnd: trialEndsAt,
+    limits: getPlan("basic").limits,
+  });
   await Wallet.create({ workspace: workspace._id, balance: 0, currency: "USD" });
 
   req.user.activeWorkspace = workspace._id;

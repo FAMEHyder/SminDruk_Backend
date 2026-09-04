@@ -18,6 +18,7 @@ import BulkPost from "../models/bulkPost.model.js";
 
 import Notification from "../models/notification.model.js";
 import Subscription from "../models/subscription.model.js";
+import Workspace from "../models/workspace.model.js";
 import { getPlan, UNLIMITED } from "../utils/subscriptionPlans.js";
 
 
@@ -28,10 +29,15 @@ const createPost = asyncHandler(async (req, res) => {
   const subscription = await Subscription.findOne({ workspace: workspaceId });
   if (!subscription) throw ApiError.badRequest("A subscription is required before creating posts.");
 
-  if (subscription.status === "trialing" && subscription.trialEndsAt && subscription.trialEndsAt <= new Date()) {
+  const isTrialExpired = subscription.status === "trialing" && subscription.trialEndsAt && subscription.trialEndsAt <= new Date();
+  const isPaidPeriodExpired =
+    subscription.status === "active" && subscription.currentPeriodEnd && subscription.currentPeriodEnd <= new Date();
+  if (isTrialExpired || isPaidPeriodExpired) {
     subscription.status = "expired";
     subscription.plan = "free";
+    subscription.limits = getPlan("free").limits;
     await subscription.save();
+    await Workspace.findByIdAndUpdate(workspaceId, { plan: "free" });
   }
 
   if (subscription.status === "expired" || subscription.status === "cancelled") {
