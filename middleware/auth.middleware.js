@@ -62,7 +62,10 @@ const authenticate = asyncHandler(async (req, _res, next) => {
  * Must be used after `authenticate`.
  */
 const authorize = (...allowedRoles) => (req, _res, next) => {
-  if (!req.user || !allowedRoles.includes(req.user.role)) {
+  // Older database records may use "super admin"; treat it as the canonical
+  // schema role "superadmin" while preserving strict access checks.
+  const normalizedRole = req.user?.role === "super admin" ? "superadmin" : req.user?.role;
+  if (!normalizedRole || !allowedRoles.includes(normalizedRole)) {
     throw ApiError.forbidden("You do not have permission to perform this action.");
   }
   next();

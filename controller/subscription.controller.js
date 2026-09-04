@@ -21,6 +21,25 @@ const ensureCurrentSubscription = async (workspaceId) => {
   const subscription = await Subscription.findOne({ workspace: workspaceId });
   if (!subscription) throw ApiError.notFound("Subscription not found for this workspace.");
 
+  // Grant the product's one-time 30-day Basic trial to legacy workspaces that
+  // predate the trial feature. Expired accounts have trialUsed=true and will
+  // not receive another trial.
+  if (subscription.plan === "free" && !subscription.trialUsed) {
+    const trialStartedAt = new Date();
+    const trialEndsAt = new Date(trialStartedAt.getTime() + 30 * 24 * 60 * 60 * 1000);
+    subscription.plan = "basic";
+    subscription.status = "trialing";
+    subscription.startedAt = trialStartedAt;
+    subscription.trialStartedAt = trialStartedAt;
+    subscription.trialEndsAt = trialEndsAt;
+    subscription.currentPeriodEnd = trialEndsAt;
+    subscription.trialUsed = true;
+    subscription.limits = limitsForPlan("basic");
+    await subscription.save();
+    await Workspace.findByIdAndUpdate(workspaceId, { plan: "basic" });
+    return subscription;
+  }
+
   const isTrialExpired = subscription.status === "trialing" && subscription.trialEndsAt && subscription.trialEndsAt <= new Date();
   const isPaidPeriodExpired =
     subscription.status === "active" && subscription.currentPeriodEnd && subscription.currentPeriodEnd <= new Date();
