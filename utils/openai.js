@@ -77,7 +77,9 @@ const getClient = () => {
   return client;
 };
 
-const getModel = () => process.env.GROQ_MODEL?.trim() || "llama-3.3-70b-versatile";
+// Keep every Create Post AI tool on the approved Groq model. Do not read an
+// older GROQ_MODEL Railway value here, because it may point to a retired Llama model.
+const getModel = () => "openai/gpt-oss-20b";
 
 /**
  * Generic chat completion helper used by the AI module.
