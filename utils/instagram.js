@@ -12,7 +12,8 @@ const IG_GRAPH_VERSION = "v21.0";
 const IG_GRAPH_API = `${IG_GRAPH}/${IG_GRAPH_VERSION}`;
 const FB_PAGE_TOKEN_TTL_DAYS = 60;
 
-const getInstagramAppId = () => getEnv("INSTAGRAM_APP_ID", "IG_APP_ID") || getEnv("FB_APP_ID");
+const getExplicitInstagramAppId = () => getEnv("INSTAGRAM_APP_ID", "IG_APP_ID");
+const getInstagramAppId = () => getExplicitInstagramAppId() || getEnv("FB_APP_ID");
 const getInstagramAppSecret = () => getEnv("INSTAGRAM_APP_SECRET", "IG_APP_SECRET") || getEnv("FB_APP_SECRET");
 
 const instagramGraphBase = (account) =>
@@ -50,13 +51,69 @@ const listFacebookPagesWithInstagram = async (userToken) => {
     limit: 100,
   });
 
-  return pages
-    .map((page) => {
-      const ig = page.instagram_business_account || page.connected_instagram_account;
-      if (!ig?.id || !page.access_token) return null;
-      return { page, ig };
-    })
-    .filter(Boolean);
+  const linked = [];
+  for (const page of pages) {
+    if (!page?.id || !page.access_token) continue;
+    let ig = page.instagram_business_account || page.connected_instagram_account;
+    if (!ig?.id) {
+      try {
+        const { data } = await axios.get(`${FB_GRAPH}/${page.id}`, {
+          params: {
+            access_token: page.access_token,
+            fields:
+              "instagram_business_account{id,username,name,profile_picture_url,followers_count},connected_instagram_account{id,username,name,profile_picture_url,followers_count}",
+          },
+        });
+        ig = data.instagram_business_account || data.connected_instagram_account;
+      } catch (error) {
+        logger.warn(`Instagram lookup failed for Facebook Page ${page.id}: ${instagramApiError(error, error.message)}`);
+      }
+    }
+    if (ig?.id) linked.push({ page, ig });
+  }
+  return linked;
+};
+
+const exchangeFacebookInstagramCode = async ({ code, redirectUri }) => {
+  const clientId = getEnv("FB_APP_ID");
+  const clientSecret = getEnv("FB_APP_SECRET");
+  if (!clientId || !clientSecret) throw new Error("Facebook app ID and secret are not configured.");
+
+  let shortToken;
+  try {
+    const tokenRes = await axios.get(`${FB_GRAPH}/oauth/access_token`, {
+      params: {
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: redirectUri,
+        code: stripInstagramAuthCode(code),
+      },
+    });
+    shortToken = tokenRes.data?.access_token;
+  } catch (error) {
+    throw new Error(instagramApiError(error, "Facebook did not accept this Instagram authorization code."));
+  }
+  if (!shortToken) throw new Error("Facebook did not return an access token for Instagram.");
+
+  let longUserToken = shortToken;
+  let expiresIn = FB_PAGE_TOKEN_TTL_DAYS * 24 * 60 * 60;
+  try {
+    const longTokenRes = await axios.get(`${FB_GRAPH}/oauth/access_token`, {
+      params: {
+        grant_type: "fb_exchange_token",
+        client_id: clientId,
+        client_secret: clientSecret,
+        fb_exchange_token: shortToken,
+      },
+    });
+    longUserToken = longTokenRes.data?.access_token || shortToken;
+    if (Number(longTokenRes.data?.expires_in) > 0) expiresIn = Number(longTokenRes.data.expires_in);
+  } catch (error) {
+    logger.warn(`Instagram Facebook long-lived token exchange failed, using short-lived token: ${instagramApiError(error, error.message)}`);
+  }
+
+  const linked = await listFacebookPagesWithInstagram(longUserToken);
+  return { longUserToken, linked, expiresIn };
 };
 
 const createInstagramLoginUrl = ({ clientId, redirectUri, state }) => {
@@ -254,8 +311,10 @@ export {
   IG_GRAPH_API,
   createInstagramLoginUrl,
   ensureFreshInstagramLoginTokensForAccountIds,
+  exchangeFacebookInstagramCode,
   exchangeInstagramLoginCode,
   fetchPagedGraph,
+  getExplicitInstagramAppId,
   getInstagramAppId,
   getInstagramAppSecret,
   instagramApiError,

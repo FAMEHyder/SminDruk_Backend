@@ -20,10 +20,11 @@ import {
 } from "../utils/x.js";
 import {
   createInstagramLoginUrl,
+  exchangeFacebookInstagramCode,
   exchangeInstagramLoginCode,
   fetchPagedGraph,
   FB_GRAPH,
-  getInstagramAppId,
+  getExplicitInstagramAppId,
   instagramApiError,
   refreshInstagramLoginToken,
   runInstagramLoginTokenRefreshJob,
@@ -227,28 +228,46 @@ const instagramConnectStart = (req, res) => {
   if (!workspaceId || !userId) {
     throw ApiError.badRequest("workspaceId and userId are required to start the Instagram connection.");
   }
-  const clientId = getInstagramAppId();
-  if (!clientId) throw ApiError.badRequest("Instagram OAuth is not configured. Set INSTAGRAM_APP_ID or FB_APP_ID.");
+
+  const instagramAppId = getExplicitInstagramAppId();
+  const facebookAppId = getEnv("FB_APP_ID");
+  const clientId = instagramAppId || facebookAppId;
+  if (!clientId) throw ApiError.badRequest("Instagram OAuth is not configured. Set FB_APP_ID.");
 
   const frontendUrl = typeof returnTo === "string" ? trimTrailingSlash(returnTo) : "";
   const safeReturnTo = getAllowedOrigins().has(frontendUrl) ? frontendUrl : getFrontendUrl();
+  const authFlow = instagramAppId ? "instagram_login" : "facebook";
   const state = encodeURIComponent(
     JSON.stringify({
       workspaceId,
       userId,
       returnTo: safeReturnTo,
       connectMode: connectMode === "dataset" ? "dataset" : "manage",
+      authFlow,
       nonce: crypto.randomUUID(),
     })
   );
+  const redirectUri = getInstagramRedirectUri();
 
-  return res.redirect(
-    createInstagramLoginUrl({
-      clientId,
-      redirectUri: getInstagramRedirectUri(),
-      state,
-    })
-  );
+  if (authFlow === "instagram_login") {
+    return res.redirect(createInstagramLoginUrl({ clientId, redirectUri, state }));
+  }
+
+  const scopes = [
+    "instagram_basic",
+    "instagram_content_publish",
+    "pages_show_list",
+    "pages_read_engagement",
+    "business_management",
+  ];
+  const fbUrl =
+    `https://www.facebook.com/${FB_GRAPH_VERSION}/dialog/oauth` +
+    `?client_id=${clientId}` +
+    `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+    `&scope=${scopes.join(",")}` +
+    `&response_type=code` +
+    `&state=${state}`;
+  return res.redirect(fbUrl);
 };
 
 // GET /api/v1/social-accounts/instagram/callback
@@ -266,8 +285,9 @@ const instagramConnectCallback = asyncHandler(async (req, res) => {
     const requestedReturnTo = trimTrailingSlash(parsed.returnTo);
     returnTo = getAllowedOrigins().has(requestedReturnTo) ? requestedReturnTo : returnTo;
     const connectSource = parsed.connectMode === "dataset" ? "dataset" : "manage";
+    const authFlow = parsed.authFlow === "instagram_login" ? "instagram_login" : "facebook";
 
-    try {
+    if (authFlow === "instagram_login") {
       const profile = await exchangeInstagramLoginCode({
         code: String(code),
         redirectUri: getInstagramRedirectUri(),
@@ -279,16 +299,37 @@ const instagramConnectCallback = asyncHandler(async (req, res) => {
         profile,
       });
       return res.redirect(`${returnTo}/dashboard/connect-channels?ig=connected`);
-    } catch (loginError) {
-      const reason = instagramApiError(
-        loginError,
-        loginError.message || "Could not connect this Instagram account."
-      );
-      logger.error(`Instagram connect callback failed: ${reason}`);
-      return res.redirect(`${returnTo}/dashboard/connect-channels?ig=error&reason=${encodeURIComponent(reason)}`);
     }
+
+    const { longUserToken, linked, expiresIn } = await exchangeFacebookInstagramCode({
+      code: String(code),
+      redirectUri: getInstagramRedirectUri(),
+    });
+    if (!linked.length) {
+      return res.redirect(
+        `${returnTo}/dashboard/connect-channels?ig=error&reason=${encodeURIComponent(
+          "No Instagram professional account linked to a Facebook Page was found. Convert Instagram to Business or Creator, link it to a Facebook Page you manage, then connect again."
+        )}`
+      );
+    }
+
+    const tokenIssuedAt = new Date();
+    const tokenExpiresAt = new Date(Date.now() + (expiresIn || FB_PAGE_TOKEN_TTL_DAYS * 24 * 60 * 60) * 1000);
+    for (const { page, ig } of linked) {
+      await upsertInstagramFromFacebookPage({
+        workspaceId: parsed.workspaceId,
+        userId: parsed.userId,
+        connectSource,
+        page,
+        ig,
+        longUserToken,
+        tokenIssuedAt,
+        tokenExpiresAt,
+      });
+    }
+    return res.redirect(`${returnTo}/dashboard/connect-channels?ig=connected`);
   } catch (connectError) {
-    const reason = connectError.response?.data?.error?.message || connectError.message;
+    const reason = instagramApiError(connectError, connectError.message || "Could not connect this Instagram account.");
     logger.error(`Instagram connect callback failed: ${reason}`);
     return res.redirect(`${returnTo}/dashboard/connect-channels?ig=error&reason=${encodeURIComponent(reason)}`);
   }
