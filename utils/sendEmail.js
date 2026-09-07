@@ -23,18 +23,23 @@ const getEmailConfig = () => {
   const pass = strip(getEnv("EMAIL_PASS", "SMTP_PASS", "SMTP_PASSWORD", "EMAIL_PASSWORD")).replace(/\s+/g, "");
   const resendKey = strip(getEnv("RESEND_API_KEY"));
   const brevoKey = strip(getEnv("BREVO_API_KEY", "SIB_API_KEY", "SENDINBLUE_API_KEY"));
+  const emailjsServiceId = strip(getEnv("EMAILJS_SERVICE_ID"));
+  const emailjsTemplateId = strip(getEnv("EMAILJS_TEMPLATE_ID"));
+  const emailjsPublicKey = strip(getEnv("EMAILJS_PUBLIC_KEY", "EMAILJS_USER_ID"));
+  const emailjsPrivateKey = strip(getEnv("EMAILJS_PRIVATE_KEY", "EMAILJS_ACCESS_TOKEN"));
+  const emailjsReady = Boolean(emailjsServiceId && emailjsTemplateId && emailjsPublicKey);
   const fromEnv = strip(getEnv("EMAIL_FROM", "SMTP_FROM"));
   let host = strip(getEnv("EMAIL_HOST", "SMTP_HOST"));
   const port = Number(getEnv("EMAIL_PORT", "SMTP_PORT") || 587);
   if (!host && user.toLowerCase().endsWith("@gmail.com")) host = "smtp.gmail.com";
   const gmail = `${host} ${user}`.toLowerCase().includes("gmail");
   const from = gmail && user ? `SminDruk <${user}>` : fromEnv || (user ? `SminDruk <${user}>` : "SminDruk <no-reply@smindruk.app>");
-  return { user, pass, host, port, from, resendKey, brevoKey, gmail };
+  return { user, pass, host, port, from, resendKey, brevoKey, gmail, emailjsServiceId, emailjsTemplateId, emailjsPublicKey, emailjsPrivateKey, emailjsReady };
 };
 
 const isEmailConfigured = () => {
-  const { user, pass, host, resendKey, brevoKey } = getEmailConfig();
-  if (brevoKey || resendKey) return true;
+  const { user, pass, host, resendKey, brevoKey, emailjsReady } = getEmailConfig();
+  if (emailjsReady || brevoKey || resendKey) return true;
   if (isRailway()) return false;
   return Boolean(host && user && pass);
 };
@@ -44,6 +49,9 @@ const allowDevEmailBypass = () => !isProduction() && !isEmailConfigured();
 const publicEmailSendError = (error) => {
   const raw = String(error?.response || error?.message || "Unknown email error");
   const lower = raw.toLowerCase();
+  if (lower.includes("emailjs") || lower.includes("the user id is required")) {
+    return "EmailJS rejected the request. Check EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, EMAILJS_PUBLIC_KEY, and EMAILJS_PRIVATE_KEY.";
+  }
   if (lower.includes("brevo_api_key") || lower.includes("cannot use gmail smtp")) {
     return raw;
   }
@@ -82,6 +90,47 @@ const smtpTransports = () => {
     ];
   }
   return [{ host, port, secure: port === 465, auth }];
+};
+
+const sendViaEmailJs = async ({ to, subject, html, otp }) => {
+  const { emailjsServiceId, emailjsTemplateId, emailjsPublicKey, emailjsPrivateKey, user } = getEmailConfig();
+  const code = otp || String(html || "").match(/\b(\d{6})\b/)?.[1] || "";
+  const text = String(html || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  const payload = {
+    service_id: emailjsServiceId,
+    template_id: emailjsTemplateId,
+    user_id: emailjsPublicKey,
+    accessToken: emailjsPrivateKey,
+    template_params: {
+      to_email: to,
+      to_name: "SminDruk user",
+      from_name: "SminDruk",
+      from_email: user || "no-reply@smindruk.app",
+      reply_to: user || to,
+      email: to,
+      user_email: to,
+      subject,
+      message: text,
+      html,
+      otp: code,
+      code,
+      passcode: code,
+    },
+  };
+
+  const response = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: process.env.FRONTEND_URL_LIVE || "https://smindruk.vercel.app",
+    },
+    body: JSON.stringify(payload),
+  });
+  const body = await response.text();
+  if (!response.ok) {
+    throw new Error(body || `EmailJS failed with HTTP ${response.status}.`);
+  }
+  logger.info(`EmailJS sent "${subject}" to ${to}`);
 };
 
 const sendViaBrevo = async ({ to, subject, html, from, user }) => {
@@ -143,9 +192,13 @@ const sendViaSmtp = async ({ to, subject, html, from }) => {
  * Sends a transactional email through Brevo/Resend HTTP APIs, or local SMTP.
  * Railway cannot open Gmail SMTP ports, so production uses HTTPS only.
  */
-const sendEmail = async ({ to, subject, html }) => {
-  const { from, user, resendKey, brevoKey } = getEmailConfig();
+const sendEmail = async ({ to, subject, html, otp }) => {
+  const { from, user, resendKey, brevoKey, emailjsReady } = getEmailConfig();
 
+  if (emailjsReady) {
+    await sendViaEmailJs({ to, subject, html, otp });
+    return;
+  }
   if (brevoKey) {
     await sendViaBrevo({ to, subject, html, from, user });
     return;
@@ -155,10 +208,10 @@ const sendEmail = async ({ to, subject, html }) => {
     return;
   }
   if (isRailway()) {
-    throw new Error("Railway cannot use Gmail SMTP. Add BREVO_API_KEY from https://app.brevo.com (SMTP & API → API keys).");
+    throw new Error("Railway cannot use Gmail SMTP. Add EmailJS keys (EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, EMAILJS_PUBLIC_KEY, EMAILJS_PRIVATE_KEY) or BREVO_API_KEY.");
   }
   if (!isEmailConfigured()) {
-    throw new Error("Email is not configured. Set BREVO_API_KEY, or local EMAIL_HOST/EMAIL_USER/EMAIL_PASS.");
+    throw new Error("Email is not configured. Set EmailJS keys, BREVO_API_KEY, or local EMAIL_HOST/EMAIL_USER/EMAIL_PASS.");
   }
   await sendViaSmtp({ to, subject, html, from });
 };

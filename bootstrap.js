@@ -110,8 +110,8 @@ const bootstrap = async (app, setReady) => {
     const email = getEmailConfig();
     logger.info(
       isEmailConfigured()
-        ? `Email ready (${email.brevoKey ? "brevo" : email.resendKey ? "resend" : email.host} as ${email.user || email.from})`
-        : "Email is not configured — Railway needs BREVO_API_KEY (Gmail SMTP is blocked)."
+        ? `Email ready (${email.emailjsReady ? "emailjs" : email.brevoKey ? "brevo" : email.resendKey ? "resend" : email.host} as ${email.user || email.from})`
+        : "Email is not configured — Railway needs EmailJS keys or BREVO_API_KEY (Gmail SMTP is blocked)."
     );
   } catch (error) {
     logger.error(`Database startup failed: ${error.message}`);

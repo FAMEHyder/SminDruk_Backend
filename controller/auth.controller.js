@@ -46,12 +46,12 @@ const issueTokensForUser = async (user, req, rememberMe = false) => {
 const generateVerificationCode = () => crypto.randomInt(100000, 999999).toString();
 const normalizeEmail = (email) => String(email || "").trim().toLowerCase();
 
-const deliverEmail = async ({ to, subject, html }) => {
+const deliverEmail = async ({ to, subject, html, otp }) => {
   if (!isEmailConfigured()) {
-    throw ApiError.internal("Email server is not configured. Railway cannot use Gmail SMTP. Add BREVO_API_KEY.");
+    throw ApiError.internal("Email server is not configured. Add EmailJS keys or BREVO_API_KEY on Railway.");
   }
   try {
-    await sendEmail({ to, subject, html });
+    await sendEmail({ to, subject, html, otp });
   } catch (error) {
     logger.warn(`Email could not be sent: ${error.message}`);
     throw ApiError.internal(`Reset email could not be sent. ${publicEmailSendError(error)}`);
@@ -85,6 +85,7 @@ const register = asyncHandler(async (req, res) => {
         to: user.email,
         subject: "Verify your SminDruk account",
         html: verificationEmail(verificationCode),
+        otp: verificationCode,
       });
       emailSent = true;
     } catch (error) {
@@ -120,6 +121,7 @@ const resendVerification = asyncHandler(async (req, res) => {
         to: user.email,
         subject: "Your new SminDruk verification code",
         html: verificationEmail(verificationCode),
+        otp: verificationCode,
       });
       emailSent = true;
     } catch (error) {
@@ -230,6 +232,7 @@ const forgotPassword = asyncHandler(async (req, res) => {
       to: user.email,
       subject: "Your SminDruk password reset code",
       html: passwordResetOtpEmail(otp),
+      otp,
     });
   } catch (error) {
     await clearPasswordReset(user._id);

@@ -1247,7 +1247,7 @@ const getApiSettings = asyncHandler(async (_req, res) => {
         key: "CLOUDINARY",
         connected: check("CLOUDINARY_CLOUD_NAME") && check("CLOUDINARY_API_KEY") && check("CLOUDINARY_API_SECRET"),
       },
-      { name: "Email / SMTP", key: "SMTP", connected: check("BREVO_API_KEY") || check("RESEND_API_KEY") || check("SMTP_HOST") || check("EMAIL_HOST") },
+      { name: "Email / SMTP", key: "SMTP", connected: check("EMAILJS_SERVICE_ID") || check("BREVO_API_KEY") || check("RESEND_API_KEY") || check("SMTP_HOST") || check("EMAIL_HOST") },
       { name: "Stripe", key: "STRIPE", connected: check("STRIPE_SECRET_KEY") },
       { name: "MongoDB", key: "MONGO", connected: check("MONGO_URL") || check("MONGODB_URI") },
       { name: "JWT", key: "JWT_SECRET", connected: check("JWT_SECRET") || check("JWT_SECRET_KEY") },
