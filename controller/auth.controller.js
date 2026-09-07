@@ -293,7 +293,11 @@ const resetPassword = asyncHandler(async (req, res) => {
   user.password = password;
   await user.save();
   await clearPasswordReset(user._id);
-  await AuditLog.create({ user: user._id, event: "password_changed" });
+  try {
+    await AuditLog.create({ user: user._id, event: "password_changed" });
+  } catch (error) {
+    logger.warn(`Password reset audit log skipped: ${error.message}`);
+  }
 
   return new ApiResponse(200, "Password has been reset successfully.").send(res);
 });

@@ -11,6 +11,7 @@ const auditLogSchema = new mongoose.Schema(
         "user_login_failed",
         "user_logout",
         "user_updated",
+        "password_changed",
         "post_published",
         "post_scheduled",
         "cron_job_run",
