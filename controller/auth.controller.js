@@ -7,7 +7,12 @@ import ApiResponse from "../utils/apiResponse.js";
 import User from "../models/user.model.js";
 import RefreshToken from "../models/refreshToken.model.js";
 import AuditLog from "../models/auditLog.model.js";
-import sendEmail from "../utils/sendEmail.js";
+import sendEmail, {
+  allowDevEmailBypass,
+  isEmailConfigured,
+  passwordResetEmail,
+  verificationEmail,
+} from "../utils/sendEmail.js";
 import logger from "../utils/logger.js";
 
 const REFRESH_TOKEN_TTL_DAYS = 30;
@@ -30,8 +35,6 @@ const issueTokensForUser = async (user, req, rememberMe = false) => {
 
 /** Generates a 6-digit numeric verification code (matches the frontend's OTP input). */
 const generateVerificationCode = () => crypto.randomInt(100000, 999999).toString();
-
-const isEmailConfigured = () => Boolean(process.env.EMAIL_HOST && process.env.EMAIL_USER && process.env.EMAIL_PASS);
 
 // POST /api/v1/auth/register
 const register = asyncHandler(async (req, res) => {
@@ -57,8 +60,8 @@ const register = asyncHandler(async (req, res) => {
     try {
       await sendEmail({
         to: user.email,
-        subject: "Verify your Smindruk account",
-        html: `<p>Welcome to Smindruk! Your verification code is: <b>${verificationCode}</b></p>`,
+        subject: "Verify your SminDruk account",
+        html: verificationEmail(verificationCode),
       });
       emailSent = true;
     } catch (error) {
@@ -73,7 +76,7 @@ const register = asyncHandler(async (req, res) => {
     emailSent,
     // Only exposed when no SMTP is configured yet, so local/dev testing isn't blocked
     // waiting on an email that will never arrive. Remove once EMAIL_* is set in production.
-    ...(emailSent ? {} : { devVerificationCode: verificationCode }),
+    ...(allowDevEmailBypass() && !emailSent ? { devVerificationCode: verificationCode } : {}),
   }).send(res);
 });
 
@@ -94,8 +97,8 @@ const resendVerification = asyncHandler(async (req, res) => {
     try {
       await sendEmail({
         to: user.email,
-        subject: "Your new Smindruk verification code",
-        html: `<p>Your new verification code is: <b>${verificationCode}</b></p>`,
+        subject: "Your new SminDruk verification code",
+        html: verificationEmail(verificationCode),
       });
       emailSent = true;
     } catch (error) {
@@ -107,7 +110,7 @@ const resendVerification = asyncHandler(async (req, res) => {
 
   return new ApiResponse(200, "Verification code resent.", {
     emailSent,
-    ...(emailSent ? {} : { devVerificationCode: verificationCode }),
+    ...(allowDevEmailBypass() && !emailSent ? { devVerificationCode: verificationCode } : {}),
   }).send(res);
 });
 
@@ -197,8 +200,8 @@ const forgotPassword = asyncHandler(async (req, res) => {
     try {
       await sendEmail({
         to: user.email,
-        subject: "Reset your Smindruk password",
-        html: `<p>Click <a href="${resetUrl}">here</a> to reset your password. This link expires in 1 hour.</p>`,
+        subject: "Reset your SminDruk password",
+        html: passwordResetEmail(resetUrl),
       });
       emailSent = true;
     } catch (error) {
@@ -210,8 +213,7 @@ const forgotPassword = asyncHandler(async (req, res) => {
 
   return new ApiResponse(200, "If that email exists, a reset link has been sent.", {
     emailSent,
-    // Dev-only convenience while no SMTP is configured — remove once EMAIL_* is set.
-    ...(emailSent ? {} : { devResetToken: resetToken }),
+    ...(allowDevEmailBypass() && !emailSent ? { devResetToken: resetToken } : {}),
   }).send(res);
 });
 

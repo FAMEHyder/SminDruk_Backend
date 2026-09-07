@@ -1,7 +1,7 @@
 import asyncHandler from "../utils/asyncHandler.js";
 import ApiResponse from "../utils/apiResponse.js";
 import ContactMessage from "../models/contactMessage.model.js";
-import sendEmail from "../utils/sendEmail.js";
+import sendEmail, { getEmailConfig } from "../utils/sendEmail.js";
 import logger from "../utils/logger.js";
 
 // POST /api/v1/contact
@@ -11,8 +11,10 @@ const submitContactForm = asyncHandler(async (req, res) => {
   const entry = await ContactMessage.create({ type: "contact_form", name, email, subject, message });
 
   try {
+    const notifyTo = getEmailConfig().user;
+    if (!notifyTo) throw new Error("EMAIL_USER is not configured.");
     await sendEmail({
-      to: process.env.EMAIL_USER,
+      to: notifyTo,
       subject: `New contact form submission: ${subject}`,
       html: `<p><b>${name}</b> (${email}) wrote:</p><p>${message}</p>`,
     });
