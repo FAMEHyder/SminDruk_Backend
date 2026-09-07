@@ -1,6 +1,5 @@
 import axios from "axios";
 import { decrypt } from "./encrypt.js";
-import { publishErrorMessage } from "./publishError.js";
 import logger from "./logger.js";
 
 const FB_GRAPH_VERSION = "v19.0";
@@ -65,6 +64,11 @@ const createFacebookLiveOnPage = async ({
   };
 };
 
-const liveErrorMessage = (error) => publishErrorMessage(error, error.message);
+const liveErrorMessage = (error) =>
+  error?.response?.data?.error?.message ||
+  error?.response?.data?.error_description ||
+  error?.response?.data?.message ||
+  error?.message ||
+  "Could not start this live video.";
 
 export { createFacebookLiveOnPage, liveErrorMessage, waitBetweenPages };

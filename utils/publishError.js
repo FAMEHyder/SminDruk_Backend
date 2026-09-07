@@ -1,8 +1,6 @@
 const RECONNECT_ACCOUNT_MESSAGE = "Reconnect your account once and try again.";
 
 const RECONNECT_PATTERNS = [
-  "oauth",
-  "oauthexception",
   "access token",
   "session has expired",
   "session has been invalidated",
@@ -15,9 +13,6 @@ const RECONNECT_PATTERNS = [
   "bad decrypt",
   "invalid_token",
   "invalid token",
-  "unauthorized",
-  "not authorized",
-  "permission denied",
   "error validating access token",
   "could not authenticate",
   "reconnect your account",
@@ -25,14 +20,15 @@ const RECONNECT_PATTERNS = [
   "please reconnect",
 ];
 
+const TOKEN_EXPIRY_CODES = [102, 190, 458, 463, 467, 492];
+
 const isReconnectRequiredError = (error) => {
   const graphError = error?.response?.data?.error;
   const codes = [Number(graphError?.code), Number(graphError?.error_subcode)];
-  if (codes.some((code) => [10, 102, 190, 200, 458, 463, 467, 492].includes(code))) return true;
+  if (codes.some((code) => TOKEN_EXPIRY_CODES.includes(code))) return true;
   const status = Number(error?.response?.status);
   if (status === 401) return true;
   const text = [
-    graphError?.type,
     graphError?.message,
     error?.response?.data?.detail,
     error?.response?.data?.title,
