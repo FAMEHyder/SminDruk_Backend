@@ -2,7 +2,8 @@ import axios from "axios";
 import Media from "../models/media.model.js";
 import PagePost from "../models/pagePost.model.js";
 import SocialAccount from "../models/socialAccount.model.js";
-import { decrypt } from "./encrypt.js";
+import { publishErrorMessage } from "./publishError.js";
+import { getUsableLinkedInAccount } from "./linkedinTokenRefresh.js";
 import logger from "./logger.js";
 
 const LINKEDIN_API_URL = "https://api.linkedin.com/rest/posts";
@@ -48,13 +49,13 @@ const publishPostToLinkedInAccounts = async (post) => {
     workspace: post.workspace?._id ?? post.workspace,
     platform: "linkedin",
     status: "connected",
-  }).select("+accessToken");
+  }).select("+accessToken +refreshToken");
   if (!accounts.length) throw new Error("Selected LinkedIn accounts were not found or are disconnected.");
 
   const results = [];
   for (const account of accounts) {
     try {
-      const token = decrypt(account.accessToken);
+      const { token } = await getUsableLinkedInAccount(account);
       const imageUrn = media?.length ? await uploadImageToLinkedIn({ accountId: account.accountId, token, media: media[0] }) : null;
       const { headers } = await axios.post(
         LINKEDIN_API_URL,
@@ -99,7 +100,7 @@ const publishPostToLinkedInAccounts = async (post) => {
       );
       results.push({ success: true, accountId: account._id, accountName: account.accountName, postId, postLink });
     } catch (error) {
-      const message = error.response?.data?.message || error.message;
+      const message = publishErrorMessage(error, error.message);
       logger.error(`LinkedIn publish failed for ${account.accountName}: ${message}`);
       await PagePost.create({
         workspace: post.workspace,

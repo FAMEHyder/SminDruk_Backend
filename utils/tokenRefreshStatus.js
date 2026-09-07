@@ -1,5 +1,8 @@
+const TOKEN_REFRESH_INTERVAL_DAYS = Number(process.env.FB_TOKEN_REFRESH_INTERVAL_DAYS) || 7;
 const TOKEN_REFRESH_AFTER_DAYS = Number(process.env.FB_TOKEN_REFRESH_AFTER_DAYS) || 45;
 const TOKEN_REFRESH_CRON_MAX_DAYS = Number(process.env.FB_TOKEN_REFRESH_CRON_MAX_DAYS) || 60;
+const TOKEN_REFRESH_EXPIRY_BUFFER_DAYS = Number(process.env.FB_TOKEN_REFRESH_EXPIRY_BUFFER_DAYS) || 20;
+const TOKEN_REFRESH_PUBLISH_BUFFER_DAYS = Number(process.env.FB_TOKEN_REFRESH_PUBLISH_BUFFER_DAYS) || 30;
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -16,9 +19,9 @@ const getDaysSinceIssued = (tokenIssuedAt, createdAt) => {
 
 /**
  * @returns {"healthy" | "refresh_due" | "cron_expired"}
- * - healthy: token younger than 45 days
- * - refresh_due: 45–59 days — cron retries daily + manual refresh available
- * - cron_expired: 60+ days — cron stops, manual refresh still required
+ * - healthy: token younger than 45 days (cron still refreshes from day 7)
+ * - refresh_due: 45–59 days — cron missed earlier refreshes, manual refresh available
+ * - cron_expired: 60+ days — Meta cannot extend an expired token; reconnect required
  */
 const getTokenRefreshStatus = (tokenIssuedAt, createdAt) => {
   const days = getDaysSinceIssued(tokenIssuedAt, createdAt);
@@ -27,17 +30,38 @@ const getTokenRefreshStatus = (tokenIssuedAt, createdAt) => {
   return "cron_expired";
 };
 
-const isCronRefreshEligible = (tokenIssuedAt, createdAt) => {
+const isTokenExpiringSoon = (tokenExpiresAt, bufferDays = TOKEN_REFRESH_EXPIRY_BUFFER_DAYS) => {
+  if (!tokenExpiresAt) return false;
+  const expires = new Date(tokenExpiresAt).getTime();
+  if (Number.isNaN(expires)) return false;
+  const remaining = expires - Date.now();
+  return remaining > 0 && remaining <= bufferDays * MS_PER_DAY;
+};
+
+const isWithinTokenCronLifetime = (tokenIssuedAt, createdAt) => {
+  return getDaysSinceIssued(tokenIssuedAt, createdAt) < TOKEN_REFRESH_CRON_MAX_DAYS;
+};
+
+/** Cron refreshes from day 7 until day 60 so tokens never sit idle until expiry. */
+const isCronRefreshEligible = (tokenIssuedAt, createdAt, tokenExpiresAt) => {
+  if (!isWithinTokenCronLifetime(tokenIssuedAt, createdAt)) return false;
   const days = getDaysSinceIssued(tokenIssuedAt, createdAt);
-  return days >= TOKEN_REFRESH_AFTER_DAYS && days < TOKEN_REFRESH_CRON_MAX_DAYS;
+  return days >= TOKEN_REFRESH_INTERVAL_DAYS || isTokenExpiringSoon(tokenExpiresAt);
 };
 
 const isManualRefreshAvailable = (tokenIssuedAt, createdAt) => {
-  return getDaysSinceIssued(tokenIssuedAt, createdAt) >= TOKEN_REFRESH_AFTER_DAYS;
+  return getDaysSinceIssued(tokenIssuedAt, createdAt) >= TOKEN_REFRESH_INTERVAL_DAYS;
 };
 
 const needsTokenRefreshAttention = (tokenIssuedAt, createdAt) => {
-  return isManualRefreshAvailable(tokenIssuedAt, createdAt);
+  return getDaysSinceIssued(tokenIssuedAt, createdAt) >= TOKEN_REFRESH_AFTER_DAYS;
+};
+
+/** Extra safety net before publish if cron has not renewed the token yet. */
+const shouldRefreshBeforePublish = (tokenIssuedAt, createdAt, tokenExpiresAt) => {
+  if (!isWithinTokenCronLifetime(tokenIssuedAt, createdAt)) return false;
+  const days = getDaysSinceIssued(tokenIssuedAt, createdAt);
+  return days >= TOKEN_REFRESH_PUBLISH_BUFFER_DAYS || isTokenExpiringSoon(tokenExpiresAt);
 };
 
 const formatTokenRefreshMeta = (account) => ({
@@ -45,19 +69,25 @@ const formatTokenRefreshMeta = (account) => ({
   tokenExpiresAt: account.tokenExpiresAt || null,
   daysSinceIssued: getDaysSinceIssued(account.tokenIssuedAt, account.createdAt),
   refreshStatus: getTokenRefreshStatus(account.tokenIssuedAt, account.createdAt),
-  cronEligible: isCronRefreshEligible(account.tokenIssuedAt, account.createdAt),
+  cronEligible: isCronRefreshEligible(account.tokenIssuedAt, account.createdAt, account.tokenExpiresAt),
   manualRefreshAvailable: isManualRefreshAvailable(account.tokenIssuedAt, account.createdAt),
   lastTokenRefreshAttemptAt: account.lastTokenRefreshAttemptAt || null,
   lastTokenRefreshError: account.lastTokenRefreshError || null,
 });
 
 export {
+  TOKEN_REFRESH_INTERVAL_DAYS,
   TOKEN_REFRESH_AFTER_DAYS,
   TOKEN_REFRESH_CRON_MAX_DAYS,
+  TOKEN_REFRESH_EXPIRY_BUFFER_DAYS,
+  TOKEN_REFRESH_PUBLISH_BUFFER_DAYS,
   getDaysSinceIssued,
   getTokenRefreshStatus,
+  isTokenExpiringSoon,
+  isWithinTokenCronLifetime,
   isCronRefreshEligible,
   isManualRefreshAvailable,
   needsTokenRefreshAttention,
+  shouldRefreshBeforePublish,
   formatTokenRefreshMeta,
 };

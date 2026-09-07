@@ -55,9 +55,9 @@ const ensureCurrentSubscription = async (workspaceId) => {
 };
 
 const getPlans = asyncHandler(async (_req, res) => {
-  const plans = Object.entries(MANAGEMENT_PLANS).map(([id, plan]) => ({
+  const plans = Object.keys(MANAGEMENT_PLANS).map((id) => ({
     id,
-    ...plan,
+    ...getPlan(id),
     trialDays: id === "free" ? 0 : 30,
     trialExcludes: id === "free" ? [] : ["x"],
   }));

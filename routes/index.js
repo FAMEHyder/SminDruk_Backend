@@ -17,6 +17,7 @@ import __route_subscription_routes from "./subscription.routes.js";
 import __route_admin_routes from "./admin.routes.js";
 import __route_chatbot_routes from "./chatbot.routes.js";
 import __route_smm_routes from "./smm.routes.js";
+import __route_facebookLive_routes from "./facebookLive.routes.js";
 import { linkedInConnectCallback, xConnectCallback } from "../controller/socialAccount.controller.js";
 
 const router = express.Router();
@@ -43,5 +44,6 @@ router.use("/subscriptions", __route_subscription_routes);
 router.use("/admin", __route_admin_routes);
 router.use("/chatbot", __route_chatbot_routes);
 router.use("/smm", __route_smm_routes);
+router.use("/live-videos", __route_facebookLive_routes);
 
 export default router;

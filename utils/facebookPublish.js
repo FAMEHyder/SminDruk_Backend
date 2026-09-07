@@ -5,6 +5,8 @@ import Media from "../models/media.model.js";
 import PagePost from "../models/pagePost.model.js";
 import { decrypt } from "./encrypt.js";
 import { buildFacebookPostLink } from "./facebookPostLink.js";
+import { publishErrorMessage } from "./publishError.js";
+import { ensureFreshMetaTokensForAccountIds } from "./facebookTokenRefresh.js";
 import logger from "./logger.js";
 
 const FB_GRAPH_VERSION = "v19.0";
@@ -102,6 +104,8 @@ const publishPostToFacebookPages = async (post) => {
     throw new Error("No Facebook pages selected for this post.");
   }
 
+  await ensureFreshMetaTokensForAccountIds(accountIds);
+
   const accounts = await resolvePublishableFacebookAccounts(post, accountIds);
 
   if (!accounts.length) {
@@ -150,7 +154,7 @@ const publishPostToFacebookPages = async (post) => {
         postLink,
       });
     } catch (error) {
-      const message = error.response?.data?.error?.message || error.message;
+      const message = publishErrorMessage(error, error.message);
       logger.error(`Facebook publish failed for page ${account.accountName}: ${message}`);
 
       await PagePost.create({

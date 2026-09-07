@@ -17,6 +17,7 @@ import PagePost from "../models/pagePost.model.js";
 import BulkPost from "../models/bulkPost.model.js";
 
 import Notification from "../models/notification.model.js";
+import { publishErrorMessage } from "../utils/publishError.js";
 import Subscription from "../models/subscription.model.js";
 import Workspace from "../models/workspace.model.js";
 import { getPlan, UNLIMITED } from "../utils/subscriptionPlans.js";
@@ -432,7 +433,9 @@ const publishPostNow = asyncHandler(async (req, res) => {
 
     post.status = "failed";
 
-    post.failureReason = error.message;
+    const message = publishErrorMessage(error, error.message);
+
+    post.failureReason = message;
 
     await post.save();
 
@@ -444,13 +447,13 @@ const publishPostNow = asyncHandler(async (req, res) => {
 
       title: "Post failed to publish",
 
-      message: error.message,
+      message,
 
       metadata: { postId: post._id },
 
     });
 
-    throw ApiError.internal(error.message || "Failed to publish post to one or more platforms.");
+    throw ApiError.internal(message || "Failed to publish post to one or more platforms.");
 
   }
 

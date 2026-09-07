@@ -4,14 +4,103 @@ import BulkPost from "../models/bulkPost.model.js";
 import Notification from "../models/notification.model.js";
 import { executePublish } from "./publishPost.js";
 import { executeBulkPublish } from "./bulkFacebookPublish.js";
-import { runFacebookTokenRefreshJob } from "./facebookTokenRefresh.js";
-import { runXTokenRefreshJob } from "./x.js";
+import { ensureFreshMetaTokensForAccountIds, ensureFreshDatasetTokensForPages, runFacebookTokenRefreshJob } from "./facebookTokenRefresh.js";
+import { runXTokenRefreshJob, refreshXTokensForAccount } from "./x.js";
+import { runLinkedInTokenRefreshJob, refreshLinkedInTokensForAccount } from "./linkedinTokenRefresh.js";
+import { runInstagramLoginTokenRefreshJob, refreshInstagramLoginToken } from "./instagram.js";
 import { purgeExpiredPasswordResets } from "./passwordReset.js";
+import { isReconnectRequiredError, publishErrorMessage } from "./publishError.js";
+import { isWithinTokenCronLifetime } from "./tokenRefreshStatus.js";
+import SocialAccount from "../models/socialAccount.model.js";
+import ConnectedPage from "../models/connectedPage.model.js";
 import logger from "./logger.js";
 
 const STUCK_PUBLISHING_MS = 10 * 60 * 1000;
 /** Notify on first failure, then every N retries (avoid spam while never giving up). */
 const FAILURE_NOTIFY_EVERY = 10;
+
+const refreshSocialTokensForPost = async (post) => {
+  const accountIds = post.socialAccounts?.map((id) => String(id?._id || id)).filter(Boolean) || [];
+  if (!accountIds.length) return false;
+
+  const accounts = await SocialAccount.find({
+    _id: { $in: accountIds },
+    status: "connected",
+  }).select("platform authSource tokenIssuedAt createdAt");
+
+  const stillInWindow = accounts.some((account) => isWithinTokenCronLifetime(account.tokenIssuedAt, account.createdAt));
+  if (!stillInWindow) return false;
+
+  await ensureFreshMetaTokensForAccountIds(accountIds, { force: true });
+
+  await Promise.allSettled(
+    accounts
+      .filter((account) => account.platform === "x")
+      .map((account) => refreshXTokensForAccount(account._id))
+  );
+  await Promise.allSettled(
+    accounts
+      .filter((account) => account.platform === "linkedin")
+      .map((account) => refreshLinkedInTokensForAccount(account._id))
+  );
+  await Promise.allSettled(
+    accounts
+      .filter((account) => account.platform === "instagram" && account.authSource === "instagram_login")
+      .map((account) => refreshInstagramLoginToken(account._id).catch(() => null))
+  );
+
+  return true;
+};
+
+const publishScheduledPostWithTokenRetry = async (post) => {
+  try {
+    await executePublish(post);
+  } catch (error) {
+    if (!isReconnectRequiredError(error)) throw error;
+    const refreshed = await refreshSocialTokensForPost(post);
+    if (!refreshed) throw error;
+    logger.info(`Retrying scheduled post ${post._id} after token refresh.`);
+    const retryPost = await Post.findById(post._id).populate("media");
+    if (!retryPost) throw error;
+    retryPost.status = "publishing";
+    await executePublish(retryPost);
+  }
+};
+
+const publishScheduledBulkWithTokenRetry = async (bulkPost) => {
+  try {
+    return await executeBulkPublish({
+      workspaceId: bulkPost.workspace,
+      secretKey: bulkPost.secretKey,
+      content: bulkPost.content,
+      fromPage: bulkPost.fromPage,
+      toPage: bulkPost.toPage,
+      category: bulkPost.category || "",
+      postType: bulkPost.postType,
+      mediaId: bulkPost.mediaId,
+    });
+  } catch (error) {
+    if (!isReconnectRequiredError(error)) throw error;
+    const pages = await ConnectedPage.find({
+      status: "connected",
+      pageNumber: { $gte: bulkPost.fromPage, $lte: bulkPost.toPage },
+    }).select("tokenIssuedAt createdAt tokenExpiresAt lastTokenRefreshError workspace connectedBy pageName");
+    const stillInWindow = pages.some((page) => isWithinTokenCronLifetime(page.tokenIssuedAt, page.createdAt));
+    if (!stillInWindow) throw error;
+    await ensureFreshDatasetTokensForPages(pages, { force: true });
+    logger.info(`Retrying scheduled bulk post ${bulkPost._id} after token refresh.`);
+    return executeBulkPublish({
+      workspaceId: bulkPost.workspace,
+      secretKey: bulkPost.secretKey,
+      content: bulkPost.content,
+      fromPage: bulkPost.fromPage,
+      toPage: bulkPost.toPage,
+      category: bulkPost.category || "",
+      postType: bulkPost.postType,
+      mediaId: bulkPost.mediaId,
+    });
+  }
+};
 
 /**
  * Atomically claims one due post so multiple scheduler ticks cannot publish twice.
@@ -87,7 +176,7 @@ const runScheduledPostsJob = async () => {
         throw new Error("No X accounts selected for this scheduled post.");
       }
 
-      await executePublish(post);
+      await publishScheduledPostWithTokenRetry(post);
 
       await Notification.create({
         user: post.createdBy,
@@ -100,12 +189,16 @@ const runScheduledPostsJob = async () => {
       logger.info(`Scheduled post ${post._id} published successfully.`);
     } catch (error) {
       const nextRetryCount = (post.retryCount || 0) + 1;
+      const userMessage = publishErrorMessage(error, error.message);
+      const notifyMessage = isReconnectRequiredError(error)
+        ? userMessage
+        : `Publish attempt failed (${userMessage}). Will keep retrying automatically.`;
 
       // Never mark scheduled posts as failed — keep retrying every minute.
       await Post.findByIdAndUpdate(post._id, {
         $set: {
           status: "scheduled",
-          failureReason: error.message,
+          failureReason: userMessage,
         },
         $inc: { retryCount: 1 },
       });
@@ -114,8 +207,8 @@ const runScheduledPostsJob = async () => {
         await Notification.create({
           user: post.createdBy,
           type: "publish_failed",
-          title: "Scheduled post retrying",
-          message: `Publish attempt failed (${error.message}). Will keep retrying automatically.`,
+          title: isReconnectRequiredError(error) ? "Reconnect your account" : "Scheduled post retrying",
+          message: notifyMessage,
           metadata: { postId: post._id, retryCount: nextRetryCount },
         }).catch((notifyError) =>
           logger.warn(`Could not create failure notification: ${notifyError.message}`)
@@ -155,16 +248,7 @@ const runScheduledBulkPostsJob = async () => {
     await bulkPost.save();
 
     try {
-      const result = await executeBulkPublish({
-        workspaceId: bulkPost.workspace,
-        secretKey: bulkPost.secretKey,
-        content: bulkPost.content,
-        fromPage: bulkPost.fromPage,
-        toPage: bulkPost.toPage,
-        category: bulkPost.category || "",
-        postType: bulkPost.postType,
-        mediaId: bulkPost.mediaId,
-      });
+      const result = await publishScheduledBulkWithTokenRetry(bulkPost);
 
       bulkPost.status = "published";
       bulkPost.publishedCount = result.publishedCount;
@@ -182,15 +266,18 @@ const runScheduledBulkPostsJob = async () => {
 
       logger.info(`Scheduled bulk post ${bulkPost._id} published successfully.`);
     } catch (error) {
+      const userMessage = publishErrorMessage(error, error.message);
       bulkPost.status = "scheduled";
-      bulkPost.failureReason = error.message;
+      bulkPost.failureReason = userMessage;
       await bulkPost.save();
 
       await Notification.create({
         user: bulkPost.createdBy,
         type: "publish_failed",
-        title: "Scheduled bulk post retrying",
-        message: `Publish attempt failed (${error.message}). Will keep retrying automatically.`,
+        title: isReconnectRequiredError(error) ? "Reconnect your account" : "Scheduled bulk post retrying",
+        message: isReconnectRequiredError(error)
+          ? userMessage
+          : `Publish attempt failed (${userMessage}). Will keep retrying automatically.`,
         metadata: { bulkPostId: bulkPost._id, secretKey: bulkPost.secretKey },
       }).catch((notifyError) =>
         logger.warn(`Could not create bulk failure notification: ${notifyError.message}`)
@@ -214,8 +301,7 @@ const startScheduler = () => {
   });
 
   const cronTimezone = process.env.CRON_TIMEZONE || "Asia/Karachi";
-  // Refresh multiple times a day during the safe 45–60 day Meta-token window.
-  // This prevents a Railway deploy/outage at one daily run from causing expiry.
+  // Refresh every 6 hours from day 7 so tokens never sit idle until Meta's 60-day expiry.
   const tokenRefreshCron = process.env.FB_TOKEN_REFRESH_CRON || "0 */6 * * *";
 
   cron.schedule(
@@ -227,12 +313,18 @@ const startScheduler = () => {
       runXTokenRefreshJob().catch((error) =>
         logger.error(`X token refresh job crashed: ${error.message}`)
       );
+      runLinkedInTokenRefreshJob().catch((error) =>
+        logger.error(`LinkedIn token refresh job crashed: ${error.message}`)
+      );
+      runInstagramLoginTokenRefreshJob().catch((error) =>
+        logger.error(`Instagram login token refresh job crashed: ${error.message}`)
+      );
     },
     { timezone: cronTimezone }
   );
 
   logger.info("Post scheduler started (running every minute).");
-  logger.info(`Facebook and X token refresh scheduled: ${tokenRefreshCron} (${cronTimezone}).`);
+  logger.info(`Facebook, X, LinkedIn, and Instagram token refresh scheduled: ${tokenRefreshCron} (${cronTimezone}).`);
 
   runScheduledPostsJob().catch((error) =>
     logger.error(`Initial scheduler run failed: ${error.message}`)
@@ -246,9 +338,15 @@ const startScheduler = () => {
   runXTokenRefreshJob().catch((error) =>
     logger.error(`Initial X token refresh check failed: ${error.message}`)
   );
+  runLinkedInTokenRefreshJob().catch((error) =>
+    logger.error(`Initial LinkedIn token refresh check failed: ${error.message}`)
+  );
+  runInstagramLoginTokenRefreshJob().catch((error) =>
+    logger.error(`Initial Instagram login token refresh check failed: ${error.message}`)
+  );
   purgeExpiredPasswordResets().catch((error) =>
     logger.error(`Initial password OTP cleanup failed: ${error.message}`)
   );
 };
 
-export { startScheduler, runScheduledPostsJob, runScheduledBulkPostsJob, runFacebookTokenRefreshJob, runXTokenRefreshJob };
+export { startScheduler, runScheduledPostsJob, runScheduledBulkPostsJob, runFacebookTokenRefreshJob, runXTokenRefreshJob, runLinkedInTokenRefreshJob };

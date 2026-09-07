@@ -6,6 +6,8 @@ import PagePost from "../models/pagePost.model.js";
 import Media from "../models/media.model.js";
 import { decrypt } from "./encrypt.js";
 import { buildFacebookPostLink } from "./facebookPostLink.js";
+import { publishErrorMessage } from "./publishError.js";
+import { ensureFreshDatasetTokensForPages } from "./facebookTokenRefresh.js";
 import logger from "./logger.js";
 
 const FB_GRAPH_VERSION = "v19.0";
@@ -108,17 +110,20 @@ const executeBulkPublish = async ({
     query.category = category.trim();
   }
 
-  const pages = await ConnectedPage.find(query).sort({ pageNumber: 1 }).select("+pageAccessToken");
+  const pages = await ConnectedPage.find(query).sort({ pageNumber: 1 }).select("+pageAccessToken +userAccessToken");
 
   if (!pages.length) {
     const categoryHint = category?.trim() ? ` in category "${category.trim()}"` : "";
     throw new Error(`No trending pages found in range ${from}–${to}${categoryHint}.`);
   }
 
+  await ensureFreshDatasetTokensForPages(pages);
+  const freshPages = await ConnectedPage.find(query).sort({ pageNumber: 1 }).select("+pageAccessToken");
+
   const results = [];
 
-  for (let i = 0; i < pages.length; i++) {
-    const page = pages[i];
+  for (let i = 0; i < freshPages.length; i++) {
+    const page = freshPages[i];
     try {
       const { postId, postLink } = await publishConnectedPagePost({
         page,
@@ -150,7 +155,7 @@ const executeBulkPublish = async ({
         postLink,
       });
     } catch (error) {
-      const message = error.response?.data?.error?.message || error.message;
+      const message = publishErrorMessage(error, error.message);
       logger.error(`Bulk publish failed for page #${page.pageNumber}: ${message}`);
 
       await PagePost.create({
@@ -174,14 +179,14 @@ const executeBulkPublish = async ({
       });
     }
 
-    if (i < pages.length - 1) await waitBetweenPages();
+    if (i < freshPages.length - 1) await waitBetweenPages();
   }
 
   const publishedCount = results.filter((item) => item.success).length;
   const failedCount = results.length - publishedCount;
 
   if (publishedCount === 0) {
-    throw new Error(results[0]?.error || "Bulk publish failed for all selected pages.");
+    throw new Error(publishErrorMessage(results[0]?.error || "Bulk publish failed for all selected pages."));
   }
 
   return { results, publishedCount, failedCount, total: results.length };

@@ -1,5 +1,6 @@
 import { decrypt, encrypt } from "../utils/encrypt.js";
 import { refreshFacebookTokensForAccount, runFacebookTokenRefreshJob } from "../utils/facebookTokenRefresh.js";
+import { refreshLinkedInTokensForAccount, runLinkedInTokenRefreshJob } from "../utils/linkedinTokenRefresh.js";
 import { getAllowedOrigins, getApiUrl, getEnv, getFrontendUrl, trimTrailingSlash } from "../utils/env.js";
 import axios from "axios";
 import crypto from "crypto";
@@ -17,6 +18,16 @@ import {
   runXTokenRefreshJob,
   syncXPostsForAccount,
 } from "../utils/x.js";
+import {
+  createInstagramLoginUrl,
+  exchangeInstagramLoginCode,
+  fetchPagedGraph,
+  FB_GRAPH,
+  getInstagramAppId,
+  instagramApiError,
+  refreshInstagramLoginToken,
+  runInstagramLoginTokenRefreshJob,
+} from "../utils/instagram.js";
 import logger from "../utils/logger.js";
 
 /**
@@ -30,6 +41,72 @@ import logger from "../utils/logger.js";
 
 const FB_GRAPH_VERSION = "v19.0";
 const FB_PAGE_TOKEN_TTL_DAYS = 60;
+
+const upsertInstagramFromFacebookPage = async ({
+  workspaceId,
+  userId,
+  connectSource,
+  page,
+  ig,
+  longUserToken,
+  tokenIssuedAt,
+  tokenExpiresAt,
+}) => {
+  if (!ig?.id || !page?.access_token) return;
+  await SocialAccount.findOneAndUpdate(
+    { workspace: workspaceId, platform: "instagram", accountId: ig.id },
+    {
+      workspace: workspaceId,
+      connectedBy: userId,
+      platform: "instagram",
+      accountId: ig.id,
+      accountName: ig.username ? `@${ig.username}` : ig.name || "Instagram account",
+      username: ig.username || "",
+      avatar: ig.profile_picture_url || "",
+      followersCount: ig.followers_count || 0,
+      accessToken: encrypt(page.access_token),
+      userAccessToken: encrypt(longUserToken),
+      tokenIssuedAt,
+      tokenExpiresAt,
+      status: "connected",
+      connectSource,
+      authSource: "facebook_page",
+      lastSyncedAt: new Date(),
+      lastTokenRefreshAttemptAt: null,
+      lastTokenRefreshError: null,
+    },
+    { upsert: true, new: true }
+  );
+};
+
+const saveInstagramLoginAccount = async ({ workspaceId, userId, connectSource, profile }) => {
+  const tokenIssuedAt = new Date();
+  const tokenExpiresAt = new Date(Date.now() + (profile.expiresIn || FB_PAGE_TOKEN_TTL_DAYS * 24 * 60 * 60) * 1000);
+  await SocialAccount.findOneAndUpdate(
+    { workspace: workspaceId, platform: "instagram", accountId: profile.accountId },
+    {
+      workspace: workspaceId,
+      connectedBy: userId,
+      platform: "instagram",
+      accountId: profile.accountId,
+      accountName: profile.username ? `@${profile.username}` : profile.name || "Instagram account",
+      username: profile.username || "",
+      avatar: profile.avatar || "",
+      followersCount: profile.followersCount || 0,
+      accessToken: encrypt(profile.accessToken),
+      userAccessToken: encrypt(profile.accessToken),
+      tokenIssuedAt,
+      tokenExpiresAt,
+      status: "connected",
+      connectSource,
+      authSource: "instagram_login",
+      lastSyncedAt: new Date(),
+      lastTokenRefreshAttemptAt: null,
+      lastTokenRefreshError: null,
+    },
+    { upsert: true, new: true }
+  );
+};
 
 const getFacebookRedirectUri = () => `${getApiUrl()}/api/v1/social-accounts/facebook/callback`;
 const getInstagramRedirectUri = () =>
@@ -150,20 +227,28 @@ const instagramConnectStart = (req, res) => {
   if (!workspaceId || !userId) {
     throw ApiError.badRequest("workspaceId and userId are required to start the Instagram connection.");
   }
+  const clientId = getInstagramAppId();
+  if (!clientId) throw ApiError.badRequest("Instagram OAuth is not configured. Set INSTAGRAM_APP_ID or FB_APP_ID.");
 
   const frontendUrl = typeof returnTo === "string" ? trimTrailingSlash(returnTo) : "";
   const safeReturnTo = getAllowedOrigins().has(frontendUrl) ? frontendUrl : getFrontendUrl();
-  const state = encodeURIComponent(JSON.stringify({ workspaceId, userId, returnTo: safeReturnTo, connectMode: connectMode === "dataset" ? "dataset" : "manage", nonce: crypto.randomUUID() }));
-  const scopes = ["instagram_basic", "instagram_content_publish", "pages_show_list", "pages_read_engagement", "business_management"];
-  const url =
-    `https://www.facebook.com/${FB_GRAPH_VERSION}/dialog/oauth` +
-    `?client_id=${process.env.FB_APP_ID}` +
-    `&redirect_uri=${encodeURIComponent(getInstagramRedirectUri())}` +
-    `&scope=${scopes.join(",")}` +
-    `&response_type=code` +
-    `&state=${state}`;
+  const state = encodeURIComponent(
+    JSON.stringify({
+      workspaceId,
+      userId,
+      returnTo: safeReturnTo,
+      connectMode: connectMode === "dataset" ? "dataset" : "manage",
+      nonce: crypto.randomUUID(),
+    })
+  );
 
-  return res.redirect(url);
+  return res.redirect(
+    createInstagramLoginUrl({
+      clientId,
+      redirectUri: getInstagramRedirectUri(),
+      state,
+    })
+  );
 };
 
 // GET /api/v1/social-accounts/instagram/callback
@@ -180,85 +265,28 @@ const instagramConnectCallback = asyncHandler(async (req, res) => {
     const parsed = JSON.parse(decodeURIComponent(state));
     const requestedReturnTo = trimTrailingSlash(parsed.returnTo);
     returnTo = getAllowedOrigins().has(requestedReturnTo) ? requestedReturnTo : returnTo;
+    const connectSource = parsed.connectMode === "dataset" ? "dataset" : "manage";
 
-    const tokenRes = await axios.get(`https://graph.facebook.com/${FB_GRAPH_VERSION}/oauth/access_token`, {
-      params: {
-        client_id: process.env.FB_APP_ID,
-        client_secret: process.env.FB_APP_SECRET,
-        redirect_uri: getInstagramRedirectUri(),
-        code,
-      },
-    });
-    const longTokenRes = await axios.get(`https://graph.facebook.com/${FB_GRAPH_VERSION}/oauth/access_token`, {
-      params: {
-        grant_type: "fb_exchange_token",
-        client_id: process.env.FB_APP_ID,
-        client_secret: process.env.FB_APP_SECRET,
-        fb_exchange_token: tokenRes.data.access_token,
-      },
-    });
-    const longUserToken = longTokenRes.data.access_token;
-    const pagesRes = await axios.get(`https://graph.facebook.com/${FB_GRAPH_VERSION}/me/accounts`, {
-      params: {
-        access_token: longUserToken,
-        fields: "id,access_token",
-      },
-    });
-
-    const pages = pagesRes.data.data || [];
-    const accounts = (
-      await Promise.all(
-        pages
-          .filter((page) => page.id && page.access_token)
-          .map(async (page) => {
-            const { data } = await axios.get(`https://graph.facebook.com/${FB_GRAPH_VERSION}/${page.id}`, {
-              params: {
-                access_token: page.access_token,
-                fields: "instagram_business_account{id,username,name,profile_picture_url,followers_count}",
-              },
-            });
-            return { ...page, instagram_business_account: data.instagram_business_account };
-          })
-      )
-    ).filter((page) => page.instagram_business_account?.id);
-    if (!accounts.length) {
-      return res.redirect(
-        `${returnTo}/dashboard/connect-channels?ig=error&reason=${encodeURIComponent(
-          "No Instagram professional account linked to a Facebook Page was found."
-        )}`
+    try {
+      const profile = await exchangeInstagramLoginCode({
+        code: String(code),
+        redirectUri: getInstagramRedirectUri(),
+      });
+      await saveInstagramLoginAccount({
+        workspaceId: parsed.workspaceId,
+        userId: parsed.userId,
+        connectSource,
+        profile,
+      });
+      return res.redirect(`${returnTo}/dashboard/connect-channels?ig=connected`);
+    } catch (loginError) {
+      const reason = instagramApiError(
+        loginError,
+        loginError.message || "Could not connect this Instagram account."
       );
+      logger.error(`Instagram connect callback failed: ${reason}`);
+      return res.redirect(`${returnTo}/dashboard/connect-channels?ig=error&reason=${encodeURIComponent(reason)}`);
     }
-
-    const tokenIssuedAt = new Date();
-    const tokenExpiresAt = new Date(Date.now() + FB_PAGE_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
-    for (const page of accounts) {
-      const instagram = page.instagram_business_account;
-      await SocialAccount.findOneAndUpdate(
-        { workspace: parsed.workspaceId, platform: "instagram", accountId: instagram.id },
-        {
-          workspace: parsed.workspaceId,
-          connectedBy: parsed.userId,
-          platform: "instagram",
-          accountId: instagram.id,
-          accountName: instagram.username ? `@${instagram.username}` : instagram.name || "Instagram account",
-          username: instagram.username || "",
-          avatar: instagram.profile_picture_url || "",
-          followersCount: instagram.followers_count || 0,
-          accessToken: encrypt(page.access_token),
-          userAccessToken: encrypt(longUserToken),
-          tokenIssuedAt,
-          tokenExpiresAt,
-          status: "connected",
-          connectSource: parsed.connectMode === "dataset" ? "dataset" : "manage",
-          lastSyncedAt: new Date(),
-          lastTokenRefreshAttemptAt: null,
-          lastTokenRefreshError: null,
-        },
-        { upsert: true, new: true }
-      );
-    }
-
-    return res.redirect(`${returnTo}/dashboard/connect-channels?ig=connected`);
   } catch (connectError) {
     const reason = connectError.response?.data?.error?.message || connectError.message;
     logger.error(`Instagram connect callback failed: ${reason}`);
@@ -367,7 +395,7 @@ const facebookConnectStart = (req, res) => {
     })
   );
 
-  const scopes = ["pages_read_engagement", "public_profile", "pages_manage_posts", "pages_show_list"];
+  const scopes = ["pages_read_engagement", "public_profile", "pages_manage_posts", "pages_show_list", "publish_video"];
 
   const fbUrl =
     `https://www.facebook.com/${FB_GRAPH_VERSION}/dialog/oauth` +
@@ -429,13 +457,12 @@ const facebookConnectCallback = asyncHandler(async (req, res) => {
     const longUserToken = longTokenRes.data.access_token;
 
     // 3) Fetch every Facebook Page this user manages, with category + profile picture.
-    const pagesRes = await axios.get(`https://graph.facebook.com/${FB_GRAPH_VERSION}/me/accounts`, {
-      params: {
-        access_token: longUserToken,
-        fields: "id,name,category,picture{url},access_token",
-      },
+    const pages = await fetchPagedGraph(`${FB_GRAPH}/me/accounts`, {
+      access_token: longUserToken,
+      fields:
+        "id,name,category,picture{url},access_token,instagram_business_account{id,username,name,profile_picture_url,followers_count},connected_instagram_account{id,username,name,profile_picture_url,followers_count}",
+      limit: 100,
     });
-    const pages = pagesRes.data.data || [];
 
     if (!pages.length) {
       logger.warn(`Facebook connect for workspace ${workspaceId}: no manageable Pages found.`);
@@ -498,6 +525,16 @@ const facebookConnectCallback = asyncHandler(async (req, res) => {
           },
           { upsert: true, new: true }
         );
+        await upsertInstagramFromFacebookPage({
+          workspaceId,
+          userId,
+          connectSource: "dataset",
+          page,
+          ig: page.instagram_business_account || page.connected_instagram_account,
+          longUserToken,
+          tokenIssuedAt,
+          tokenExpiresAt,
+        });
       }
 
       return res.redirect(`${frontendUrl}/dashboard/connect-channels?fb=connected&mode=trending`);
@@ -526,6 +563,16 @@ const facebookConnectCallback = asyncHandler(async (req, res) => {
         },
         { upsert: true, new: true }
       );
+      await upsertInstagramFromFacebookPage({
+        workspaceId,
+        userId,
+        connectSource: "manage",
+        page,
+        ig: page.instagram_business_account || page.connected_instagram_account,
+        longUserToken,
+        tokenIssuedAt,
+        tokenExpiresAt,
+      });
     }
 
     return res.redirect(`${frontendUrl}/dashboard/connect-channels?fb=connected&mode=manage`);
@@ -649,8 +696,16 @@ const refreshAccountToken = asyncHandler(async (req, res) => {
     const result = await refreshXTokensForAccount(account._id);
     return new ApiResponse(200, "X account tokens refreshed successfully.", result).send(res);
   }
-  if (account.platform !== "facebook") {
-    throw ApiError.badRequest("Manual token refresh is only supported for Facebook and X accounts.");
+  if (account.platform === "linkedin") {
+    const result = await refreshLinkedInTokensForAccount(account._id);
+    return new ApiResponse(200, "LinkedIn account tokens refreshed successfully.", result).send(res);
+  }
+  if (account.platform === "instagram" && account.authSource === "instagram_login") {
+    const result = await refreshInstagramLoginToken(account._id);
+    return new ApiResponse(200, "Instagram account tokens refreshed successfully.", result).send(res);
+  }
+  if (!["facebook", "instagram"].includes(account.platform)) {
+    throw ApiError.badRequest("Manual token refresh is only supported for Facebook, Instagram, LinkedIn, and X accounts.");
   }
 
   const result = await refreshFacebookTokensForAccount(account._id);
@@ -698,8 +753,13 @@ const cronRefreshTokens = asyncHandler(async (req, res) => {
     throw ApiError.unauthorized("Invalid cron secret.");
   }
 
-  const [facebook, x] = await Promise.all([runFacebookTokenRefreshJob(), runXTokenRefreshJob()]);
-  return new ApiResponse(200, "Social token refresh job completed.", { facebook, x }).send(res);
+  const [facebook, x, linkedin, instagram] = await Promise.all([
+    runFacebookTokenRefreshJob(),
+    runXTokenRefreshJob(),
+    runLinkedInTokenRefreshJob(),
+    runInstagramLoginTokenRefreshJob(),
+  ]);
+  return new ApiResponse(200, "Social token refresh job completed.", { facebook, x, linkedin, instagram }).send(res);
 });
 
 export {

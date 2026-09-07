@@ -27,12 +27,15 @@ import {
   needsTokenRefreshAttention,
   TOKEN_REFRESH_AFTER_DAYS,
   TOKEN_REFRESH_CRON_MAX_DAYS,
+  TOKEN_REFRESH_INTERVAL_DAYS,
 } from "../utils/tokenRefreshStatus.js";
 import {
   refreshFacebookTokensForAccount,
   refreshFacebookTokensForConnectedPage,
   runFacebookTokenRefreshJob,
 } from "../utils/facebookTokenRefresh.js";
+import { runXTokenRefreshJob } from "../utils/x.js";
+import { runLinkedInTokenRefreshJob } from "../utils/linkedinTokenRefresh.js";
 import { runScheduledPostsJob, runScheduledBulkPostsJob } from "../utils/scheduler.js";
 
 const startOfToday = () => {
@@ -191,6 +194,7 @@ const getDashboardOverview = asyncHandler(async (_req, res) => {
       tokenRefreshRequired,
     },
     tokenRefreshPolicy: {
+      refreshIntervalDays: TOKEN_REFRESH_INTERVAL_DAYS,
       refreshAfterDays: TOKEN_REFRESH_AFTER_DAYS,
       cronMaxDays: TOKEN_REFRESH_CRON_MAX_DAYS,
     },
@@ -620,6 +624,7 @@ const getSocialAccountsOverview = asyncHandler(async (req, res) => {
     datasetAccounts,
     tokenRefreshRequired: refreshRequired,
     tokenRefreshPolicy: {
+      refreshIntervalDays: TOKEN_REFRESH_INTERVAL_DAYS,
       refreshAfterDays: TOKEN_REFRESH_AFTER_DAYS,
       cronMaxDays: TOKEN_REFRESH_CRON_MAX_DAYS,
     },
@@ -689,8 +694,8 @@ const getSchedulerStatus = asyncHandler(async (_req, res) => {
         failedCount: failedBulk,
       },
       {
-        name: "Facebook Token Refresh",
-        schedule: process.env.FB_TOKEN_REFRESH_CRON || "0 12 * * *",
+        name: "Facebook / X / LinkedIn Token Refresh",
+        schedule: process.env.FB_TOKEN_REFRESH_CRON || "0 */6 * * *",
         timezone: process.env.CRON_TIMEZONE || "Asia/Karachi",
         dueCount: 0,
         scheduledCount: 0,
@@ -710,12 +715,20 @@ const runSchedulerJob = asyncHandler(async (req, res) => {
   } else if (job === "bulk") {
     result = await runScheduledBulkPostsJob();
   } else if (job === "token-refresh") {
-    result = await runFacebookTokenRefreshJob();
+    result = {
+      facebook: await runFacebookTokenRefreshJob(),
+      x: await runXTokenRefreshJob(),
+      linkedin: await runLinkedInTokenRefreshJob(),
+    };
   } else if (job === "all") {
     result = {
       posts: await runScheduledPostsJob(),
       bulk: await runScheduledBulkPostsJob(),
-      tokenRefresh: await runFacebookTokenRefreshJob(),
+      tokenRefresh: {
+        facebook: await runFacebookTokenRefreshJob(),
+        x: await runXTokenRefreshJob(),
+        linkedin: await runLinkedInTokenRefreshJob(),
+      },
     };
   } else {
     throw ApiError.badRequest('Invalid job. Use "posts", "bulk", "token-refresh", or "all".');

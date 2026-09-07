@@ -56,6 +56,12 @@ const socialAccountSchema = new mongoose.Schema(
       default: "manage",
       index: true,
     },
+    /** instagram_login uses graph.instagram.com; facebook_page uses a Page token on graph.facebook.com */
+    authSource: {
+      type: String,
+      enum: ["facebook_page", "instagram_login"],
+      default: "facebook_page",
+    },
     lastSyncedAt: { type: Date },
   },
   { timestamps: true }

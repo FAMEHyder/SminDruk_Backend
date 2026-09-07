@@ -3,6 +3,7 @@ import Media from "../models/media.model.js";
 import PagePost from "../models/pagePost.model.js";
 import SocialAccount from "../models/socialAccount.model.js";
 import { X_API_URL, buildXPostLink, getUsableXAccount } from "./x.js";
+import { publishErrorMessage } from "./publishError.js";
 import logger from "./logger.js";
 
 const MAX_X_IMAGES = 4;
@@ -126,7 +127,7 @@ const publishPostToXAccounts = async (post) => {
       );
       results.push({ success: true, accountId: current._id, accountName: current.accountName, postId: tweetId, postLink });
     } catch (error) {
-      const message = error.response?.data?.detail || error.response?.data?.title || error.message;
+      const message = publishErrorMessage(error, error.message);
       logger.error(`X publish failed for ${account.accountName}: ${message}`);
       await PagePost.create({
         workspace: post.workspace,

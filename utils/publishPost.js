@@ -3,6 +3,7 @@ import { publishPostToFacebookPages } from "./facebookPublish.js";
 import { publishPostToInstagramAccounts } from "./instagramPublish.js";
 import { publishPostToLinkedInAccounts } from "./linkedinPublish.js";
 import { publishPostToXAccounts } from "./xPublish.js";
+import { publishErrorMessage } from "./publishError.js";
 
 /**
  * Executes publishing for a post document (Facebook Pages + future platforms).
@@ -31,7 +32,7 @@ const executePublish = async (post) => {
     }
 
     if (results.length > 0 && results.every((result) => !result.success)) {
-      throw new Error(failures[0] || "Facebook publish failed for all selected pages.");
+      throw new Error(publishErrorMessage(failures[0] || "Facebook publish failed for all selected pages."));
     }
   }
 
@@ -45,7 +46,7 @@ const executePublish = async (post) => {
       }
     }
     if (results.length > 0 && results.every((result) => !result.success)) {
-      throw new Error(failures[0] || "Instagram publish failed for all selected accounts.");
+      throw new Error(publishErrorMessage(failures[0] || "Instagram publish failed for all selected accounts."));
     }
   }
 
@@ -59,7 +60,7 @@ const executePublish = async (post) => {
       }
     }
     if (results.length > 0 && results.every((result) => !result.success)) {
-      throw new Error(failures[0] || "LinkedIn publish failed for all selected accounts.");
+      throw new Error(publishErrorMessage(failures[0] || "LinkedIn publish failed for all selected accounts."));
     }
   }
 
@@ -73,7 +74,7 @@ const executePublish = async (post) => {
       }
     }
     if (results.length > 0 && results.every((result) => !result.success)) {
-      throw new Error(failures[0] || "X publish failed for all selected accounts.");
+      throw new Error(publishErrorMessage(failures[0] || "X publish failed for all selected accounts."));
     }
   }
 
@@ -89,7 +90,7 @@ const executePublish = async (post) => {
   await post.save();
 
   if (post.status === "failed") {
-    throw new Error(post.failureReason || "Publish failed.");
+    throw new Error(publishErrorMessage(post.failureReason || "Publish failed."));
   }
 
   return post;

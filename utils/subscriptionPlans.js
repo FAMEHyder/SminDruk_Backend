@@ -34,6 +34,14 @@ const LEGACY_PLAN_ALIASES = {
   enterprise: "premium",
 };
 
-const getPlan = (plan) => MANAGEMENT_PLANS[plan] || MANAGEMENT_PLANS[LEGACY_PLAN_ALIASES[plan]] || MANAGEMENT_PLANS.free;
+const withLiveLimits = (plan) => ({
+  ...plan,
+  platformLiveLimits: { facebook: plan.platformPostLimits?.facebook || 0 },
+});
 
-export { MANAGEMENT_PLANS, UNLIMITED, getPlan };
+const getPlan = (plan) =>
+  withLiveLimits(MANAGEMENT_PLANS[plan] || MANAGEMENT_PLANS[LEGACY_PLAN_ALIASES[plan]] || MANAGEMENT_PLANS.free);
+
+const getFacebookLiveLimit = (planKey) => getPlan(planKey).platformLiveLimits.facebook;
+
+export { MANAGEMENT_PLANS, UNLIMITED, getPlan, getFacebookLiveLimit };
