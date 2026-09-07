@@ -2,11 +2,9 @@ import nodemailer from "nodemailer";
 import { getEnv, isProduction } from "./env.js";
 import logger from "./logger.js";
 
-let transporter;
-
 const getEmailConfig = () => {
   const user = getEnv("EMAIL_USER", "SMTP_USER", "SMTP_USERNAME");
-  const pass = getEnv("EMAIL_PASS", "SMTP_PASS", "SMTP_PASSWORD", "EMAIL_PASSWORD");
+  const pass = (getEnv("EMAIL_PASS", "SMTP_PASS", "SMTP_PASSWORD", "EMAIL_PASSWORD") || "").replace(/\s+/g, "");
   const resendKey = getEnv("RESEND_API_KEY");
   const from =
     getEnv("EMAIL_FROM", "SMTP_FROM") ||
@@ -24,17 +22,27 @@ const isEmailConfigured = () => {
 
 const allowDevEmailBypass = () => !isProduction() && !isEmailConfigured();
 
-const getTransporter = () => {
-  if (!transporter) {
-    const { host, port, user, pass } = getEmailConfig();
-    transporter = nodemailer.createTransport({
-      host,
-      port,
-      secure: port === 465,
-      auth: { user, pass },
-    });
+const createMailer = (options) =>
+  nodemailer.createTransport({
+    ...options,
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 15_000,
+    tls: { minVersion: "TLSv1.2" },
+  });
+
+const smtpTransports = () => {
+  const { user, pass, host, port } = getEmailConfig();
+  const auth = { user, pass };
+  const gmail = `${host} ${user}`.toLowerCase().includes("gmail");
+  if (gmail) {
+    return [
+      { host: "smtp.gmail.com", port: 465, secure: true, auth },
+      { service: "gmail", auth },
+      { host: "smtp.gmail.com", port: 587, secure: false, requireTLS: true, auth },
+    ];
   }
-  return transporter;
+  return [{ host, port, secure: port === 465, auth }];
 };
 
 const sendViaResend = async ({ to, subject, html, from }) => {
@@ -53,6 +61,21 @@ const sendViaResend = async ({ to, subject, html, from }) => {
   }
 };
 
+const sendViaSmtp = async ({ to, subject, html, from }) => {
+  let lastError;
+  for (const options of smtpTransports()) {
+    try {
+      const mailer = createMailer(options);
+      await mailer.sendMail({ from, to, subject, html });
+      return;
+    } catch (error) {
+      lastError = error;
+      logger.warn(`SMTP attempt failed (${options.host || options.service || "smtp"}): ${error.message}`);
+    }
+  }
+  throw lastError || new Error("SMTP send failed.");
+};
+
 /**
  * Sends a transactional email through SMTP or Resend.
  * @param {{ to: string, subject: string, html: string }} options
@@ -68,7 +91,7 @@ const sendEmail = async ({ to, subject, html }) => {
       await sendViaResend({ to, subject, html, from });
       return;
     }
-    await getTransporter().sendMail({ from, to, subject, html });
+    await sendViaSmtp({ to, subject, html, from });
   } catch (error) {
     logger.error(`Failed to send email to ${to}: ${error.message}`);
     throw error;

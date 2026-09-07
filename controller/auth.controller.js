@@ -35,10 +35,24 @@ const issueTokensForUser = async (user, req, rememberMe = false) => {
 
 /** Generates a 6-digit numeric verification code (matches the frontend's OTP input). */
 const generateVerificationCode = () => crypto.randomInt(100000, 999999).toString();
+const normalizeEmail = (email) => String(email || "").trim().toLowerCase();
+
+const deliverEmail = async ({ to, subject, html }) => {
+  if (!isEmailConfigured()) {
+    throw ApiError.internal("Email server is not configured. Add EMAIL_HOST, EMAIL_USER, and EMAIL_PASS on Railway.");
+  }
+  try {
+    await sendEmail({ to, subject, html });
+  } catch (error) {
+    logger.warn(`Email could not be sent: ${error.message}`);
+    throw ApiError.internal("Reset email could not be sent. Check EMAIL_PASS (Gmail App Password) on Railway and try again.");
+  }
+};
 
 // POST /api/v1/auth/register
 const register = asyncHandler(async (req, res) => {
-  const { firstName, lastName, email, password } = req.body;
+  const { firstName, lastName, password } = req.body;
+  const email = normalizeEmail(req.body.email);
 
   const existingUser = await User.findOne({ email });
   if (existingUser) {
@@ -74,15 +88,13 @@ const register = asyncHandler(async (req, res) => {
   return new ApiResponse(201, "Account created. Please verify your email.", {
     user: user.toSafeObject(),
     emailSent,
-    // Only exposed when no SMTP is configured yet, so local/dev testing isn't blocked
-    // waiting on an email that will never arrive. Remove once EMAIL_* is set in production.
     ...(allowDevEmailBypass() && !emailSent ? { devVerificationCode: verificationCode } : {}),
   }).send(res);
 });
 
 // POST /api/v1/auth/resend-verification
 const resendVerification = asyncHandler(async (req, res) => {
-  const { email } = req.body;
+  const email = normalizeEmail(req.body.email);
 
   const user = await User.findOne({ email });
   if (!user) throw ApiError.notFound("No account found for this email.");
@@ -116,7 +128,8 @@ const resendVerification = asyncHandler(async (req, res) => {
 
 // POST /api/v1/auth/login
 const login = asyncHandler(async (req, res) => {
-  const { email, password, rememberMe = false } = req.body;
+  const { password, rememberMe = false } = req.body;
+  const email = normalizeEmail(req.body.email);
 
   const user = await User.findOne({ email }).select("+password");
   if (!user || !user.password || !(await user.comparePassword(password))) {
@@ -180,11 +193,11 @@ const refreshToken = asyncHandler(async (req, res) => {
 
 // POST /api/v1/auth/forgot-password
 const forgotPassword = asyncHandler(async (req, res) => {
-  const { email } = req.body;
+  const email = normalizeEmail(req.body.email);
 
   const user = await User.findOne({ email });
   if (!user) {
-    // Respond the same way regardless, to avoid leaking which emails are registered.
+    // Same response whether the account exists, so emails cannot be enumerated.
     return new ApiResponse(200, "If that email exists, a reset link has been sent.").send(res);
   }
 
@@ -195,26 +208,21 @@ const forgotPassword = asyncHandler(async (req, res) => {
 
   const resetUrl = `${getFrontendUrl()}/reset-password?token=${resetToken}`;
 
-  let emailSent = false;
-  if (isEmailConfigured()) {
-    try {
-      await sendEmail({
-        to: user.email,
-        subject: "Reset your SminDruk password",
-        html: passwordResetEmail(resetUrl),
-      });
-      emailSent = true;
-    } catch (error) {
-      logger.warn(`Password reset email could not be sent: ${error.message}`);
-    }
-  } else {
+  if (allowDevEmailBypass()) {
     logger.warn(`EMAIL_HOST is not configured — password reset token for ${email}: ${resetToken}`);
+    return new ApiResponse(200, "If that email exists, a reset link has been sent.", {
+      emailSent: false,
+      devResetToken: resetToken,
+    }).send(res);
   }
 
-  return new ApiResponse(200, "If that email exists, a reset link has been sent.", {
-    emailSent,
-    ...(allowDevEmailBypass() && !emailSent ? { devResetToken: resetToken } : {}),
-  }).send(res);
+  await deliverEmail({
+    to: user.email,
+    subject: "Reset your SminDruk password",
+    html: passwordResetEmail(resetUrl),
+  });
+
+  return new ApiResponse(200, "If that email exists, a reset link has been sent.", { emailSent: true }).send(res);
 });
 
 // POST /api/v1/auth/reset-password
@@ -243,7 +251,8 @@ const resetPassword = asyncHandler(async (req, res) => {
 
 // POST /api/v1/auth/verify-email
 const verifyEmail = asyncHandler(async (req, res) => {
-  const { email, code } = req.body;
+  const { code } = req.body;
+  const email = normalizeEmail(req.body.email);
 
   const user = await User.findOne({ email, emailVerificationToken: code });
   if (!user) {

@@ -22,6 +22,7 @@ import passport from "./config/passport.js";
 import swaggerSpec from "./config/swagger.js";
 import routes from "./routes/index.js";
 import logger from "./utils/logger.js";
+import { isEmailConfigured, getEmailConfig } from "./utils/sendEmail.js";
 
 const validateEnv = () => {
   const missing = REQUIRED_ENV_VARS.filter(({ getter }) => !getter()).map(({ label }) => label);
@@ -106,6 +107,12 @@ const bootstrap = async (app, setReady) => {
     logger.info(`Active Frontend URL: ${getFrontendUrl()}`);
     logger.info(`Local API: ${getLocalApiUrl()} | Live API: ${getLiveApiUrl()}`);
     logger.info(`CORS origins: ${[...allowedOrigins].join(", ")}`);
+    const email = getEmailConfig();
+    logger.info(
+      isEmailConfigured()
+        ? `Email SMTP ready (${email.host || "resend"} as ${email.user || email.from})`
+        : "Email SMTP is not configured — password reset emails will fail until EMAIL_PASS is set."
+    );
   } catch (error) {
     logger.error(`Database startup failed: ${error.message}`);
     logger.error("Health check stays alive — fix MONGO_URL in Railway Variables and redeploy.");
