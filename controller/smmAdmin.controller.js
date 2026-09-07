@@ -198,6 +198,65 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
   return new ApiResponse(200, "SMM order status updated successfully.", order).send(res);
 });
 
+// Approving a payment is the only point at which a customer order reaches ZIO/Pak.
+const reviewOrderPayment = asyncHandler(async (req, res) => {
+  const { decision, reviewNote = "" } = req.body;
+  if (!["approve", "reject"].includes(decision)) {
+    throw ApiError.badRequest("Decision must be approve or reject.");
+  }
+
+  const order = await SmmOrder.findOne({
+    _id: req.params.id,
+    status: "pending_approval",
+    paymentStatus: "pending_approval",
+  }).select("+providerCost").populate("service");
+  if (!order) throw ApiError.notFound("Pending SMM payment request not found.");
+
+  order.paymentReviewedBy = req.user._id;
+  order.paymentReviewedAt = new Date();
+  order.paymentReviewNote = String(reviewNote).trim().slice(0, 1000);
+
+  if (decision === "reject") {
+    order.paymentStatus = "rejected";
+    order.status = "cancelled";
+    await order.save();
+    return new ApiResponse(200, "SMM payment rejected. Provider was not contacted.", order).send(res);
+  }
+
+  const service = order.service;
+  if (!service?.providerName || !service?.providerServiceId) {
+    throw ApiError.badRequest("This service has no configured provider. Provider was not contacted.");
+  }
+
+  try {
+    const provider = getProviderAdapter(service.providerName);
+    const providerBalance = await provider.getBalance();
+    const available = Number(providerBalance?.balance ?? providerBalance?.available ?? 0);
+    if (!Number.isFinite(available) || available < order.providerCost) {
+      throw ApiError.badRequest("Provider balance is too low. Provider was not contacted.");
+    }
+    const result = await provider.createOrder({
+      service: service.providerServiceId,
+      link: order.link,
+      quantity: order.quantity,
+    });
+    if (!result?.order) throw new Error("Provider did not return an order id.");
+
+    order.paymentStatus = "approved";
+    order.status = "processing";
+    order.providerOrderId = String(result.order);
+    order.providerPayload = { submittedAt: new Date() };
+    order.failureReason = "";
+    await order.save();
+    return new ApiResponse(200, "Payment approved and order sent to provider.", order).send(res);
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    order.failureReason = "Provider submission failed. Review provider configuration and retry.";
+    await order.save();
+    throw ApiError.badRequest("Provider could not accept this order. Payment remains pending approval.");
+  }
+});
+
 const creditWallet = asyncHandler(async (req, res) => {
   const { workspaceId, amount, description = "Manual wallet credit" } = req.body;
   if (!Number.isFinite(amount) || amount <= 0) throw ApiError.badRequest("A positive credit amount is required.");
@@ -234,7 +293,7 @@ const getOverview = asyncHandler(async (_req, res) => {
   const byStatus = Object.fromEntries(statusRows.map((row) => [row._id, row.count]));
   return new ApiResponse(200, "SMM overview fetched successfully.", {
     stats: {
-      categories, activeServices, totalOrders: orders, pendingOrders: byStatus.pending || 0,
+      categories, activeServices, totalOrders: orders, pendingOrders: (byStatus.pending || 0) + (byStatus.pending_approval || 0),
       completedOrders: byStatus.completed || 0, totalSales: statusRows.reduce((sum, row) => sum + row.revenue, 0),
       walletLiability: walletRows[0]?.balance || 0,
     },
@@ -279,5 +338,5 @@ const getProviderBalances = asyncHandler(async (_req, res) => {
 
 export {
   createCategory, createService, creditWallet, deleteCategory, deleteService,
-  getOverview, getProviderBalances, listCategories, listOrders, listServices, syncPakProviderServices, syncProviderServices, updateCategory, updateOrderStatus, updateService,
+  getOverview, getProviderBalances, listCategories, listOrders, listServices, reviewOrderPayment, syncPakProviderServices, syncProviderServices, updateCategory, updateOrderStatus, updateService,
 };

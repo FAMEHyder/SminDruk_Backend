@@ -135,6 +135,9 @@ const smmValidators = {
     serviceId: z.string().min(1),
     link: z.string().url("A valid target link is required.").max(2048),
     quantity: z.number().int().positive(),
+    paymentMethod: z.enum(["bank", "easypaisa", "jazzcash"]),
+    paymentProofUrl: z.string().url("Payment screenshot is required."),
+    paymentReference: z.string().max(120).optional(),
   }),
 };
 

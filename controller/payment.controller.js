@@ -62,21 +62,21 @@ const getManualPaymentMethods = asyncHandler(async (_req, res) => {
   const methods = [
     {
       id: "bank",
-      label: process.env.SUBSCRIPTION_BANK_NAME || "Bank transfer",
-      accountTitle: process.env.SUBSCRIPTION_BANK_ACCOUNT_TITLE || "",
-      accountNumber: process.env.SUBSCRIPTION_BANK_ACCOUNT_NUMBER || "",
+      label: process.env.SUBSCRIPTION_BANK_NAME || "Bank Of Punjab",
+      accountTitle: process.env.SUBSCRIPTION_BANK_ACCOUNT_TITLE || "Sat-Tara nextgen innovetions",
+      accountNumber: process.env.SUBSCRIPTION_BANK_ACCOUNT_NUMBER || "5310367011700029",
     },
     {
       id: "easypaisa",
       label: "Easypaisa",
-      accountTitle: process.env.SUBSCRIPTION_EASYPAISA_ACCOUNT_TITLE || "",
-      accountNumber: process.env.SUBSCRIPTION_EASYPAISA_ACCOUNT_NUMBER || "",
+      accountTitle: process.env.SUBSCRIPTION_EASYPAISA_ACCOUNT_TITLE || "zeeshan Haider",
+      accountNumber: process.env.SUBSCRIPTION_EASYPAISA_ACCOUNT_NUMBER || "03417405991",
     },
     {
       id: "jazzcash",
       label: "JazzCash",
-      accountTitle: process.env.SUBSCRIPTION_JAZZCASH_ACCOUNT_TITLE || "",
-      accountNumber: process.env.SUBSCRIPTION_JAZZCASH_ACCOUNT_NUMBER || "",
+      accountTitle: process.env.SUBSCRIPTION_JAZZCASH_ACCOUNT_TITLE || "zeeshan Haider",
+      accountNumber: process.env.SUBSCRIPTION_JAZZCASH_ACCOUNT_NUMBER || "03045679991",
     },
   ].filter((method) => enabled.has(method.id) && method.accountNumber);
 

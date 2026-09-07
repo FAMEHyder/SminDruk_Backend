@@ -64,6 +64,7 @@ router.post("/smm/providers/smmzio/sync-services", smmAdminController.syncProvid
 router.post("/smm/providers/paksmmcheap/sync-services", smmAdminController.syncPakProviderServices);
 router.get("/smm/orders", smmAdminController.listOrders);
 router.patch("/smm/orders/:id/status", smmAdminController.updateOrderStatus);
+router.patch("/smm/orders/:id/payment-review", smmAdminController.reviewOrderPayment);
 router.post("/smm/wallet/credit", smmAdminController.creditWallet);
 
 // AI

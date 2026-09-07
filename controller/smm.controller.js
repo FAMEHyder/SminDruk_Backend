@@ -11,7 +11,6 @@ import Wallet from "../models/wallet.model.js";
 import WalletTransaction from "../models/walletTransaction.model.js";
 import SmmRefill from "../models/smmRefill.model.js";
 import SmmSupportTicket from "../models/smmSupportTicket.model.js";
-import { getProviderAdapter } from "../utils/smmProviderAdapter.js";
 
 const pageMeta = (page = 1, limit = 20) => {
   const safeLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
@@ -116,7 +115,7 @@ const getOrder = asyncHandler(async (req, res) => {
 
 const createOrder = asyncHandler(async (req, res) => {
   await ensureMarketplaceEnabled();
-  const { serviceId, link, quantity } = req.body;
+  const { serviceId, link, quantity, paymentMethod, paymentProofUrl, paymentReference } = req.body;
   const service = await SmmService.findOne({ _id: serviceId, isActive: true }).lean();
   if (!service) throw ApiError.notFound("SMM service is unavailable.");
   if (quantity < service.minQuantity || quantity > service.maxQuantity) {
@@ -126,96 +125,25 @@ const createOrder = asyncHandler(async (req, res) => {
   const charge = Number(((quantity / 1000) * service.ratePerThousand).toFixed(4));
   const providerCost = Number(((quantity / 1000) * (service.providerCostPerThousand ?? service.ratePerThousand)).toFixed(4));
   const commission = Number((charge - providerCost).toFixed(4));
-  const providerConfigured = Boolean(service.providerName && service.providerServiceId);
+  const order = await SmmOrder.create({
+    workspace: req.workspaceId,
+    createdBy: req.user._id,
+    service: service._id,
+    publicOrderId: `SMD-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`,
+    link,
+    quantity,
+    charge,
+    providerCost,
+    commission,
+    currency: service.currency,
+    status: "pending_approval",
+    paymentStatus: "pending_approval",
+    paymentMethod,
+    paymentProofUrl,
+    paymentReference: paymentReference || "",
+  });
 
-  // Provider wallets are separate from customer wallets. Confirm the upstream
-  // balance first so customer funds are never debited for an order that cannot
-  // be submitted to its selected provider.
-  if (providerConfigured) {
-    try {
-      const providerBalance = await getProviderAdapter(service.providerName).getBalance();
-      const available = Number(providerBalance?.balance ?? providerBalance?.available ?? 0);
-      if (!Number.isFinite(available) || available < providerCost) {
-        throw ApiError.badRequest("This service is temporarily unavailable because the provider balance is low.");
-      }
-    } catch (error) {
-      if (error instanceof ApiError) throw error;
-      throw ApiError.badRequest("This service is temporarily unavailable because the provider cannot be reached.");
-    }
-  }
-  const session = await mongoose.startSession();
-  let order;
-  try {
-    await session.withTransaction(async () => {
-      const wallet = await getWallet(req.workspaceId, session);
-      if (wallet.balance < charge) throw ApiError.badRequest("Insufficient wallet balance.");
-
-      const balanceBefore = wallet.balance;
-      wallet.balance = Number((balanceBefore - charge).toFixed(4));
-      wallet.lastTransactionAt = new Date();
-      await wallet.save({ session });
-
-      [order] = await SmmOrder.create(
-        [{
-          workspace: req.workspaceId,
-          createdBy: req.user._id,
-          service: service._id,
-          publicOrderId: `SMD-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`,
-          link,
-          quantity,
-          charge,
-          providerCost,
-          commission,
-          currency: service.currency,
-        }],
-        { session }
-      );
-
-      await WalletTransaction.create(
-        [{
-          workspace: req.workspaceId,
-          wallet: wallet._id,
-          type: "debit",
-          amount: charge,
-          balanceBefore,
-          balanceAfter: wallet.balance,
-          referenceType: "order",
-          referenceId: order._id,
-          description: `Order ${order.publicOrderId}: ${service.name}`,
-          createdBy: req.user._id,
-        }],
-        { session }
-      );
-    });
-  } finally {
-    await session.endSession();
-  }
-
-  if (providerConfigured) {
-    try {
-      const result = await getProviderAdapter(service.providerName).createOrder({
-        service: service.providerServiceId,
-        link,
-        quantity,
-      });
-      if (!result?.order) throw new Error("Provider did not return an order id.");
-      order = await SmmOrder.findByIdAndUpdate(
-        order._id,
-        { status: "processing", providerOrderId: String(result.order), providerPayload: { submittedAt: new Date() } },
-        { new: true }
-      );
-    } catch (error) {
-      // The funded local order is kept pending for a controlled retry after the
-      // provider is available. Credentials and raw provider responses are not exposed.
-      order = await SmmOrder.findByIdAndUpdate(
-        order._id,
-        { failureReason: "Provider submission is pending retry." },
-        { new: true }
-      );
-    }
-  }
-
-  return new ApiResponse(201, "SMM order placed successfully.", order).send(res);
+  return new ApiResponse(201, "Order request submitted. Provider delivery will start after payment approval.", order).send(res);
 });
 
 const getDashboard = asyncHandler(async (req, res) => {
@@ -238,7 +166,7 @@ const getDashboard = asyncHandler(async (req, res) => {
     stats: {
       totalOrders: statusCounts.reduce((sum, item) => sum + item.count, 0),
       totalSpent: statusCounts.reduce((sum, item) => sum + item.totalSpent, 0),
-      pendingOrders: counts.pending || 0,
+      pendingOrders: (counts.pending || 0) + (counts.pending_approval || 0),
       processingOrders: counts.processing || 0,
       completedOrders: counts.completed || 0,
     },
