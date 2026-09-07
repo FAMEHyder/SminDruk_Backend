@@ -395,7 +395,7 @@ const facebookConnectStart = (req, res) => {
     })
   );
 
-  const scopes = ["pages_read_engagement", "public_profile", "pages_manage_posts", "pages_show_list", "publish_video"];
+  const scopes = ["pages_show_list", "pages_read_engagement", "pages_manage_posts", "public_profile"];
 
   const fbUrl =
     `https://www.facebook.com/${FB_GRAPH_VERSION}/dialog/oauth` +
