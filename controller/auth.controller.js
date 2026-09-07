@@ -10,10 +10,18 @@ import AuditLog from "../models/auditLog.model.js";
 import sendEmail, {
   allowDevEmailBypass,
   isEmailConfigured,
-  passwordResetEmail,
+  passwordResetOtpEmail,
   publicEmailSendError,
   verificationEmail,
 } from "../utils/sendEmail.js";
+import {
+  PASSWORD_OTP_TTL_MS,
+  PASSWORD_RESET_SELECT,
+  PASSWORD_TICKET_TTL_MS,
+  clearPasswordReset,
+  hashResetSecret,
+  purgeExpiredPasswordResets,
+} from "../utils/passwordReset.js";
 import logger from "../utils/logger.js";
 
 const REFRESH_TOKEN_TTL_DAYS = 30;
@@ -40,7 +48,7 @@ const normalizeEmail = (email) => String(email || "").trim().toLowerCase();
 
 const deliverEmail = async ({ to, subject, html }) => {
   if (!isEmailConfigured()) {
-    throw ApiError.internal("Email server is not configured. Add EMAIL_HOST, EMAIL_USER, and EMAIL_PASS on Railway.");
+    throw ApiError.internal("Email server is not configured. Railway cannot use Gmail SMTP. Add BREVO_API_KEY.");
   }
   try {
     await sendEmail({ to, subject, html });
@@ -195,56 +203,93 @@ const refreshToken = asyncHandler(async (req, res) => {
 // POST /api/v1/auth/forgot-password
 const forgotPassword = asyncHandler(async (req, res) => {
   const email = normalizeEmail(req.body.email);
+  await purgeExpiredPasswordResets();
 
-  const user = await User.findOne({ email });
+  const user = await User.findOne({ email }).select(PASSWORD_RESET_SELECT);
   if (!user) {
-    // Same response whether the account exists, so emails cannot be enumerated.
-    return new ApiResponse(200, "If that email exists, a reset link has been sent.").send(res);
+    return new ApiResponse(200, "If that email exists, a reset code has been sent.").send(res);
   }
 
-  const resetToken = crypto.randomBytes(32).toString("hex");
-  user.passwordResetToken = crypto.createHash("sha256").update(resetToken).digest("hex");
-  user.passwordResetExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+  const otp = crypto.randomInt(100000, 999999).toString();
+  user.passwordResetToken = hashResetSecret(`${email}:${otp}`);
+  user.passwordResetExpires = new Date(Date.now() + PASSWORD_OTP_TTL_MS);
+  user.passwordResetKind = "otp";
   await user.save();
 
-  const resetUrl = `${getFrontendUrl()}/reset-password?token=${resetToken}`;
-
   if (allowDevEmailBypass()) {
-    logger.warn(`EMAIL_HOST is not configured — password reset token for ${email}: ${resetToken}`);
-    return new ApiResponse(200, "If that email exists, a reset link has been sent.", {
+    logger.warn(`Email is not configured — password reset OTP for ${email}: ${otp}`);
+    return new ApiResponse(200, "If that email exists, a reset code has been sent.", {
       emailSent: false,
-      devResetToken: resetToken,
+      expiresInSeconds: 60,
+      devOtp: otp,
     }).send(res);
   }
 
-  await deliverEmail({
-    to: user.email,
-    subject: "Reset your SminDruk password",
-    html: passwordResetEmail(resetUrl),
-  });
+  try {
+    await deliverEmail({
+      to: user.email,
+      subject: "Your SminDruk password reset code",
+      html: passwordResetOtpEmail(otp),
+    });
+  } catch (error) {
+    await clearPasswordReset(user._id);
+    throw error;
+  }
 
-  return new ApiResponse(200, "If that email exists, a reset link has been sent.", { emailSent: true }).send(res);
+  return new ApiResponse(200, "If that email exists, a reset code has been sent.", {
+    emailSent: true,
+    expiresInSeconds: 60,
+  }).send(res);
+});
+
+// POST /api/v1/auth/verify-reset-otp
+const verifyResetOtp = asyncHandler(async (req, res) => {
+  const email = normalizeEmail(req.body.email);
+  const code = String(req.body.code || "").trim();
+  await purgeExpiredPasswordResets();
+
+  const user = await User.findOne({ email }).select(PASSWORD_RESET_SELECT);
+  if (!user?.passwordResetToken || user.passwordResetKind !== "otp") {
+    throw ApiError.badRequest("OTP is invalid or has expired.");
+  }
+  if (!user.passwordResetExpires || user.passwordResetExpires.getTime() <= Date.now()) {
+    await clearPasswordReset(user._id);
+    throw ApiError.badRequest("OTP has expired. Request a new code.");
+  }
+  if (user.passwordResetToken !== hashResetSecret(`${email}:${code}`)) {
+    throw ApiError.badRequest("OTP is invalid or has expired.");
+  }
+
+  const ticket = crypto.randomBytes(32).toString("hex");
+  user.passwordResetToken = hashResetSecret(ticket);
+  user.passwordResetExpires = new Date(Date.now() + PASSWORD_TICKET_TTL_MS);
+  user.passwordResetKind = "ticket";
+  await user.save();
+
+  return new ApiResponse(200, "OTP verified. Set a new password.", { ticket }).send(res);
 });
 
 // POST /api/v1/auth/reset-password
 const resetPassword = asyncHandler(async (req, res) => {
-  const { token, password } = req.body;
+  const email = normalizeEmail(req.body.email);
+  const { ticket, password } = req.body;
+  await purgeExpiredPasswordResets();
 
-  const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
-  const user = await User.findOne({
-    passwordResetToken: hashedToken,
-    passwordResetExpires: { $gt: new Date() },
-  });
-
-  if (!user) {
-    throw ApiError.badRequest("Password reset token is invalid or has expired.");
+  const user = await User.findOne({ email }).select(PASSWORD_RESET_SELECT);
+  if (!user?.passwordResetToken || user.passwordResetKind !== "ticket") {
+    throw ApiError.badRequest("Reset session is invalid or has expired.");
+  }
+  if (!user.passwordResetExpires || user.passwordResetExpires.getTime() <= Date.now()) {
+    await clearPasswordReset(user._id);
+    throw ApiError.badRequest("Reset session has expired. Request a new code.");
+  }
+  if (user.passwordResetToken !== hashResetSecret(ticket)) {
+    throw ApiError.badRequest("Reset session is invalid or has expired.");
   }
 
   user.password = password;
-  user.passwordResetToken = undefined;
-  user.passwordResetExpires = undefined;
   await user.save();
-
+  await clearPasswordReset(user._id);
   await AuditLog.create({ user: user._id, event: "password_changed" });
 
   return new ApiResponse(200, "Password has been reset successfully.").send(res);
@@ -295,6 +340,7 @@ export { register,
   logout,
   refreshToken,
   forgotPassword,
+  verifyResetOtp,
   resetPassword,
   verifyEmail,
   resendVerification,

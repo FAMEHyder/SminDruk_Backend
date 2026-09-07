@@ -158,6 +158,7 @@ const RECOMMENDED_ENV_VARS = [
   "EMAIL_HOST",
   "EMAIL_USER",
   "EMAIL_PASS",
+  "BREVO_API_KEY",
 ];
 
 export {

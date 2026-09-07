@@ -1,28 +1,42 @@
 import dns from "dns";
 import nodemailer from "nodemailer";
-import { getEnv, isProduction } from "./env.js";
+import { getEnv, isProduction, isRailway } from "./env.js";
 import logger from "./logger.js";
 
 dns.setDefaultResultOrder("ipv4first");
 
 const strip = (value) => String(value || "").trim().replace(/^["']|["']$/g, "");
 
+const parseFrom = (from, user) => {
+  const match = String(from || "").match(/^(.*)<([^>]+)>$/);
+  if (match) {
+    return {
+      name: match[1].trim().replace(/^["']|["']$/g, "") || "SminDruk",
+      email: match[2].trim(),
+    };
+  }
+  return { name: "SminDruk", email: user || from || "no-reply@smindruk.app" };
+};
+
 const getEmailConfig = () => {
   const user = strip(getEnv("EMAIL_USER", "SMTP_USER", "SMTP_USERNAME"));
   const pass = strip(getEnv("EMAIL_PASS", "SMTP_PASS", "SMTP_PASSWORD", "EMAIL_PASSWORD")).replace(/\s+/g, "");
   const resendKey = strip(getEnv("RESEND_API_KEY"));
+  const brevoKey = strip(getEnv("BREVO_API_KEY", "SIB_API_KEY", "SENDINBLUE_API_KEY"));
   const fromEnv = strip(getEnv("EMAIL_FROM", "SMTP_FROM"));
   let host = strip(getEnv("EMAIL_HOST", "SMTP_HOST"));
   const port = Number(getEnv("EMAIL_PORT", "SMTP_PORT") || 587);
   if (!host && user.toLowerCase().endsWith("@gmail.com")) host = "smtp.gmail.com";
   const gmail = `${host} ${user}`.toLowerCase().includes("gmail");
   const from = gmail && user ? `SminDruk <${user}>` : fromEnv || (user ? `SminDruk <${user}>` : "SminDruk <no-reply@smindruk.app>");
-  return { user, pass, host, port, from, resendKey, gmail };
+  return { user, pass, host, port, from, resendKey, brevoKey, gmail };
 };
 
 const isEmailConfigured = () => {
-  const { user, pass, host, resendKey } = getEmailConfig();
-  return Boolean(resendKey) || Boolean(host && user && pass);
+  const { user, pass, host, resendKey, brevoKey } = getEmailConfig();
+  if (brevoKey || resendKey) return true;
+  if (isRailway()) return false;
+  return Boolean(host && user && pass);
 };
 
 const allowDevEmailBypass = () => !isProduction() && !isEmailConfigured();
@@ -30,11 +44,20 @@ const allowDevEmailBypass = () => !isProduction() && !isEmailConfigured();
 const publicEmailSendError = (error) => {
   const raw = String(error?.response || error?.message || "Unknown email error");
   const lower = raw.toLowerCase();
-  if (lower.includes("invalid login") || lower.includes("badcredentials") || lower.includes("535") || lower.includes("534") || lower.includes("username and password not accepted")) {
-    return "Gmail rejected EMAIL_USER/EMAIL_PASS. Recreate the App Password for this same Gmail, then paste it into Railway EMAIL_PASS with no spaces.";
+  if (lower.includes("brevo_api_key") || lower.includes("cannot use gmail smtp")) {
+    return raw;
+  }
+  if (lower.includes("unauthorized") || lower.includes("unauthorised") || lower.includes("401")) {
+    return "Brevo API key was rejected. Recreate BREVO_API_KEY and paste it into Railway.";
+  }
+  if (lower.includes("sender") || lower.includes("not verified") || lower.includes("invalid_parameter")) {
+    return "Verify famehyder9999@gmail.com as a sender in Brevo (Senders, Domains), then try again.";
+  }
+  if (lower.includes("invalid login") || lower.includes("535") || lower.includes("534")) {
+    return "Gmail rejected EMAIL_PASS. Railway still cannot use Gmail SMTP — add BREVO_API_KEY instead.";
   }
   if (lower.includes("timeout") || lower.includes("etimedout") || lower.includes("econn") || lower.includes("socket")) {
-    return "Railway could not reach Gmail SMTP. Confirm EMAIL_HOST=smtp.gmail.com and EMAIL_PORT=465, then redeploy.";
+    return "Railway cannot reach Gmail SMTP. Add BREVO_API_KEY — Gmail App Password will not work on Railway.";
   }
   return raw.replace(/\s+/g, " ").slice(0, 180);
 };
@@ -59,6 +82,29 @@ const smtpTransports = () => {
     ];
   }
   return [{ host, port, secure: port === 465, auth }];
+};
+
+const sendViaBrevo = async ({ to, subject, html, from, user }) => {
+  const { brevoKey } = getEmailConfig();
+  const sender = parseFrom(from, user);
+  const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+    method: "POST",
+    headers: {
+      "api-key": brevoKey,
+      accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      sender,
+      to: [{ email: to }],
+      subject,
+      htmlContent: html,
+    }),
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(body || `Brevo failed with HTTP ${response.status}.`);
+  }
 };
 
 const sendViaResend = async ({ to, subject, html, from }) => {
@@ -94,25 +140,27 @@ const sendViaSmtp = async ({ to, subject, html, from }) => {
 };
 
 /**
- * Sends a transactional email through SMTP or Resend.
- * @param {{ to: string, subject: string, html: string }} options
+ * Sends a transactional email through Brevo/Resend HTTP APIs, or local SMTP.
+ * Railway cannot open Gmail SMTP ports, so production uses HTTPS only.
  */
 const sendEmail = async ({ to, subject, html }) => {
-  if (!isEmailConfigured()) {
-    throw new Error("Email is not configured. Set EMAIL_HOST, EMAIL_USER, and EMAIL_PASS.");
-  }
+  const { from, user, resendKey, brevoKey } = getEmailConfig();
 
-  const { from, resendKey } = getEmailConfig();
-  try {
-    if (resendKey) {
-      await sendViaResend({ to, subject, html, from });
-      return;
-    }
-    await sendViaSmtp({ to, subject, html, from });
-  } catch (error) {
-    logger.error(`Failed to send email to ${to}: ${error.message}`);
-    throw error;
+  if (brevoKey) {
+    await sendViaBrevo({ to, subject, html, from, user });
+    return;
   }
+  if (resendKey) {
+    await sendViaResend({ to, subject, html, from });
+    return;
+  }
+  if (isRailway()) {
+    throw new Error("Railway cannot use Gmail SMTP. Add BREVO_API_KEY from https://app.brevo.com (SMTP & API → API keys).");
+  }
+  if (!isEmailConfigured()) {
+    throw new Error("Email is not configured. Set BREVO_API_KEY, or local EMAIL_HOST/EMAIL_USER/EMAIL_PASS.");
+  }
+  await sendViaSmtp({ to, subject, html, from });
 };
 
 const wrapEmail = (title, body) => `
@@ -123,12 +171,11 @@ const wrapEmail = (title, body) => `
   </div>
 `;
 
-const passwordResetEmail = (resetUrl) =>
+const passwordResetOtpEmail = (code) =>
   wrapEmail(
-    "Reset your SminDruk password",
-    `<p>We received a request to reset your password. This link expires in 1 hour.</p>
-     <p style="margin:24px 0"><a href="${resetUrl}" style="background:#111;color:#fff;padding:12px 18px;border-radius:8px;text-decoration:none">Reset password</a></p>
-     <p style="font-size:13px;color:#666;word-break:break-all">${resetUrl}</p>`
+    "Your SminDruk password reset code",
+    `<p>Use this one-time code to reset your password. It expires in 1 minute.</p>
+     <p style="font-size:28px;letter-spacing:6px;font-weight:bold;margin:16px 0">${code}</p>`
   );
 
 const verificationEmail = (code) =>
@@ -144,6 +191,6 @@ export {
   isEmailConfigured,
   allowDevEmailBypass,
   publicEmailSendError,
-  passwordResetEmail,
+  passwordResetOtpEmail,
   verificationEmail,
 };

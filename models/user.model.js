@@ -18,6 +18,7 @@ const userSchema = new mongoose.Schema(
     emailVerificationToken: { type: String, select: false },
     passwordResetToken: { type: String, select: false },
     passwordResetExpires: { type: Date, select: false },
+    passwordResetKind: { type: String, enum: ["otp", "ticket"], select: false },
     activeWorkspace: { type: mongoose.Schema.Types.ObjectId, ref: "Workspace" },
     oauth: {
       googleId: { type: String },
@@ -45,6 +46,7 @@ userSchema.methods.toSafeObject = function toSafeObject() {
   delete obj.emailVerificationToken;
   delete obj.passwordResetToken;
   delete obj.passwordResetExpires;
+  delete obj.passwordResetKind;
   return obj;
 };
 

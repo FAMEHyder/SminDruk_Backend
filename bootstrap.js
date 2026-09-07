@@ -110,8 +110,8 @@ const bootstrap = async (app, setReady) => {
     const email = getEmailConfig();
     logger.info(
       isEmailConfigured()
-        ? `Email SMTP ready (${email.host || "resend"} as ${email.user || email.from})`
-        : "Email SMTP is not configured — password reset emails will fail until EMAIL_PASS is set."
+        ? `Email ready (${email.brevoKey ? "brevo" : email.resendKey ? "resend" : email.host} as ${email.user || email.from})`
+        : "Email is not configured — Railway needs BREVO_API_KEY (Gmail SMTP is blocked)."
     );
   } catch (error) {
     logger.error(`Database startup failed: ${error.message}`);

@@ -62,6 +62,12 @@ router.post(
   validate(authValidators.forgotPassword),
   authController.forgotPassword
 );
+router.post(
+  "/verify-reset-otp",
+  authLimiter,
+  validate(authValidators.verifyResetOtp),
+  authController.verifyResetOtp
+);
 router.post("/reset-password", validate(authValidators.resetPassword), authController.resetPassword);
 router.post("/verify-email", validate(authValidators.verifyEmail), authController.verifyEmail);
 router.post(

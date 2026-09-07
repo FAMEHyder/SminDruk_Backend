@@ -28,8 +28,13 @@ const authValidators = {
   forgotPassword: z.object({
     email: z.string().email("Invalid email address"),
   }),
+  verifyResetOtp: z.object({
+    email: z.string().email("Invalid email address"),
+    code: z.string().trim().length(6).regex(/^\d{6}$/, "OTP must be 6 digits"),
+  }),
   resetPassword: z.object({
-    token: z.string().min(1, "Reset token is required"),
+    email: z.string().email("Invalid email address"),
+    ticket: z.string().min(1, "Reset ticket is required"),
     password: z.string().min(8, "Password must be at least 8 characters"),
   }),
   verifyEmail: z.object({
@@ -48,7 +53,7 @@ const userValidators = {
     bio: z.string().max(280).optional(),
   }),
   changePassword: z.object({
-    currentPassword: z.string().min(1),
+    currentPassword: z.string().min(1).optional(),
     newPassword: z.string().min(8),
   }),
 };

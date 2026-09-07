@@ -1,8 +1,14 @@
 import { uploadToCloudinary } from "../utils/cloudinary.js";
+import { invalidateAuthUserCache } from "../middleware/auth.middleware.js";
 import asyncHandler from "../utils/asyncHandler.js";
 import ApiError from "../utils/apiError.js";
 import ApiResponse from "../utils/apiResponse.js";
 import User from "../models/user.model.js";
+
+const isSuperAdmin = (user) => {
+  const role = user?.role === "super admin" ? "superadmin" : user?.role;
+  return role === "superadmin";
+};
 
 // GET /api/v1/users/me
 const getProfile = asyncHandler(async (req, res) => {
@@ -40,14 +46,19 @@ const uploadAvatar = asyncHandler(async (req, res) => {
 // PATCH /api/v1/users/me/password
 const changePassword = asyncHandler(async (req, res) => {
   const { currentPassword, newPassword } = req.body;
-
   const user = await User.findById(req.user._id).select("+password");
-  if (!user.password || !(await user.comparePassword(currentPassword))) {
-    throw ApiError.unauthorized("Current password is incorrect.");
+  if (!user) throw ApiError.notFound("User not found.");
+
+  if (!isSuperAdmin(user)) {
+    if (!currentPassword) throw ApiError.badRequest("Current password is required.");
+    if (!user.password || !(await user.comparePassword(currentPassword))) {
+      throw ApiError.unauthorized("Current password is incorrect.");
+    }
   }
 
   user.password = newPassword;
   await user.save();
+  invalidateAuthUserCache(user._id);
 
   return new ApiResponse(200, "Password changed successfully.").send(res);
 });

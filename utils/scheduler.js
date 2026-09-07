@@ -6,6 +6,7 @@ import { executePublish } from "./publishPost.js";
 import { executeBulkPublish } from "./bulkFacebookPublish.js";
 import { runFacebookTokenRefreshJob } from "./facebookTokenRefresh.js";
 import { runXTokenRefreshJob } from "./x.js";
+import { purgeExpiredPasswordResets } from "./passwordReset.js";
 import logger from "./logger.js";
 
 const STUCK_PUBLISHING_MS = 10 * 60 * 1000;
@@ -207,6 +208,9 @@ const startScheduler = () => {
   cron.schedule("* * * * *", () => {
     runScheduledPostsJob().catch((error) => logger.error(`Scheduler job crashed: ${error.message}`));
     runScheduledBulkPostsJob().catch((error) => logger.error(`Bulk scheduler job crashed: ${error.message}`));
+    purgeExpiredPasswordResets().catch((error) =>
+      logger.error(`Password OTP cleanup crashed: ${error.message}`)
+    );
   });
 
   const cronTimezone = process.env.CRON_TIMEZONE || "Asia/Karachi";
@@ -241,6 +245,9 @@ const startScheduler = () => {
   );
   runXTokenRefreshJob().catch((error) =>
     logger.error(`Initial X token refresh check failed: ${error.message}`)
+  );
+  purgeExpiredPasswordResets().catch((error) =>
+    logger.error(`Initial password OTP cleanup failed: ${error.message}`)
   );
 };
 
