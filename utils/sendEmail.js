@@ -1,18 +1,23 @@
+import dns from "dns";
 import nodemailer from "nodemailer";
 import { getEnv, isProduction } from "./env.js";
 import logger from "./logger.js";
 
+dns.setDefaultResultOrder("ipv4first");
+
+const strip = (value) => String(value || "").trim().replace(/^["']|["']$/g, "");
+
 const getEmailConfig = () => {
-  const user = getEnv("EMAIL_USER", "SMTP_USER", "SMTP_USERNAME");
-  const pass = (getEnv("EMAIL_PASS", "SMTP_PASS", "SMTP_PASSWORD", "EMAIL_PASSWORD") || "").replace(/\s+/g, "");
-  const resendKey = getEnv("RESEND_API_KEY");
-  const from =
-    getEnv("EMAIL_FROM", "SMTP_FROM") ||
-    (user ? `SminDruk <${user}>` : "SminDruk <no-reply@smindruk.app>");
-  let host = getEnv("EMAIL_HOST", "SMTP_HOST");
+  const user = strip(getEnv("EMAIL_USER", "SMTP_USER", "SMTP_USERNAME"));
+  const pass = strip(getEnv("EMAIL_PASS", "SMTP_PASS", "SMTP_PASSWORD", "EMAIL_PASSWORD")).replace(/\s+/g, "");
+  const resendKey = strip(getEnv("RESEND_API_KEY"));
+  const fromEnv = strip(getEnv("EMAIL_FROM", "SMTP_FROM"));
+  let host = strip(getEnv("EMAIL_HOST", "SMTP_HOST"));
   const port = Number(getEnv("EMAIL_PORT", "SMTP_PORT") || 587);
-  if (!host && user?.toLowerCase().endsWith("@gmail.com")) host = "smtp.gmail.com";
-  return { user, pass, host, port, from, resendKey };
+  if (!host && user.toLowerCase().endsWith("@gmail.com")) host = "smtp.gmail.com";
+  const gmail = `${host} ${user}`.toLowerCase().includes("gmail");
+  const from = gmail && user ? `SminDruk <${user}>` : fromEnv || (user ? `SminDruk <${user}>` : "SminDruk <no-reply@smindruk.app>");
+  return { user, pass, host, port, from, resendKey, gmail };
 };
 
 const isEmailConfigured = () => {
@@ -22,23 +27,34 @@ const isEmailConfigured = () => {
 
 const allowDevEmailBypass = () => !isProduction() && !isEmailConfigured();
 
+const publicEmailSendError = (error) => {
+  const raw = String(error?.response || error?.message || "Unknown email error");
+  const lower = raw.toLowerCase();
+  if (lower.includes("invalid login") || lower.includes("badcredentials") || lower.includes("535") || lower.includes("534") || lower.includes("username and password not accepted")) {
+    return "Gmail rejected EMAIL_USER/EMAIL_PASS. Recreate the App Password for this same Gmail, then paste it into Railway EMAIL_PASS with no spaces.";
+  }
+  if (lower.includes("timeout") || lower.includes("etimedout") || lower.includes("econn") || lower.includes("socket")) {
+    return "Railway could not reach Gmail SMTP. Confirm EMAIL_HOST=smtp.gmail.com and EMAIL_PORT=465, then redeploy.";
+  }
+  return raw.replace(/\s+/g, " ").slice(0, 180);
+};
+
 const createMailer = (options) =>
   nodemailer.createTransport({
     ...options,
-    connectionTimeout: 10_000,
-    greetingTimeout: 10_000,
-    socketTimeout: 15_000,
+    family: 4,
+    connectionTimeout: 12_000,
+    greetingTimeout: 12_000,
+    socketTimeout: 20_000,
     tls: { minVersion: "TLSv1.2" },
   });
 
 const smtpTransports = () => {
-  const { user, pass, host, port } = getEmailConfig();
+  const { user, pass, host, port, gmail } = getEmailConfig();
   const auth = { user, pass };
-  const gmail = `${host} ${user}`.toLowerCase().includes("gmail");
   if (gmail) {
     return [
       { host: "smtp.gmail.com", port: 465, secure: true, auth },
-      { service: "gmail", auth },
       { host: "smtp.gmail.com", port: 587, secure: false, requireTLS: true, auth },
     ];
   }
@@ -66,11 +82,12 @@ const sendViaSmtp = async ({ to, subject, html, from }) => {
   for (const options of smtpTransports()) {
     try {
       const mailer = createMailer(options);
-      await mailer.sendMail({ from, to, subject, html });
+      await mailer.sendMail({ from, to, subject, html, replyTo: from });
+      logger.info(`Email sent to ${to} via ${options.host}:${options.port}`);
       return;
     } catch (error) {
       lastError = error;
-      logger.warn(`SMTP attempt failed (${options.host || options.service || "smtp"}): ${error.message}`);
+      logger.warn(`SMTP attempt failed (${options.host}:${options.port}): ${error.message}`);
     }
   }
   throw lastError || new Error("SMTP send failed.");
@@ -122,4 +139,11 @@ const verificationEmail = (code) =>
   );
 
 export default sendEmail;
-export { getEmailConfig, isEmailConfigured, allowDevEmailBypass, passwordResetEmail, verificationEmail };
+export {
+  getEmailConfig,
+  isEmailConfigured,
+  allowDevEmailBypass,
+  publicEmailSendError,
+  passwordResetEmail,
+  verificationEmail,
+};

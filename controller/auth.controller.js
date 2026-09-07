@@ -11,6 +11,7 @@ import sendEmail, {
   allowDevEmailBypass,
   isEmailConfigured,
   passwordResetEmail,
+  publicEmailSendError,
   verificationEmail,
 } from "../utils/sendEmail.js";
 import logger from "../utils/logger.js";
@@ -45,7 +46,7 @@ const deliverEmail = async ({ to, subject, html }) => {
     await sendEmail({ to, subject, html });
   } catch (error) {
     logger.warn(`Email could not be sent: ${error.message}`);
-    throw ApiError.internal("Reset email could not be sent. Check EMAIL_PASS (Gmail App Password) on Railway and try again.");
+    throw ApiError.internal(`Reset email could not be sent. ${publicEmailSendError(error)}`);
   }
 };
 
