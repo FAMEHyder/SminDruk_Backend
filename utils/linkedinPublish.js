@@ -4,6 +4,7 @@ import PagePost from "../models/pagePost.model.js";
 import SocialAccount from "../models/socialAccount.model.js";
 import { publishErrorMessage } from "./publishError.js";
 import { getUsableLinkedInAccount } from "./linkedinTokenRefresh.js";
+import { recordPagePost } from "./pagePostRecord.js";
 import logger from "./logger.js";
 
 const LINKEDIN_API_URL = "https://api.linkedin.com/rest/posts";
@@ -102,17 +103,20 @@ const publishPostToLinkedInAccounts = async (post) => {
     } catch (error) {
       const message = publishErrorMessage(error, error.message);
       logger.error(`LinkedIn publish failed for ${account.accountName}: ${message}`);
-      await PagePost.create({
-        workspace: post.workspace,
-        post: post._id,
-        socialAccount: account._id,
-        pageName: account.accountName,
-        pageId: account.accountId,
-        platform: "linkedin",
-        postContent: post.content || "",
-        profilePicture: account.avatar || "",
-        success: false,
-        error: message,
+      await recordPagePost({
+        filter: { post: post._id, socialAccount: account._id },
+        data: {
+          workspace: post.workspace,
+          post: post._id,
+          socialAccount: account._id,
+          pageName: account.accountName,
+          pageId: account.accountId,
+          platform: "linkedin",
+          postContent: post.content || "",
+          profilePicture: account.avatar || "",
+          success: false,
+          error: message,
+        },
       });
       results.push({ success: false, accountId: account._id, accountName: account.accountName, error: message });
     }

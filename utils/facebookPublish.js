@@ -2,11 +2,11 @@ import axios from "axios";
 import SocialAccount from "../models/socialAccount.model.js";
 import ConnectedPage from "../models/connectedPage.model.js";
 import Media from "../models/media.model.js";
-import PagePost from "../models/pagePost.model.js";
 import { decrypt } from "./encrypt.js";
 import { buildFacebookPostLink } from "./facebookPostLink.js";
 import { publishErrorMessage } from "./publishError.js";
 import { ensureFreshMetaTokensForAccountIds } from "./facebookTokenRefresh.js";
+import { recordPagePost } from "./pagePostRecord.js";
 import logger from "./logger.js";
 
 const FB_GRAPH_VERSION = "v19.0";
@@ -130,19 +130,25 @@ const publishPostToFacebookPages = async (post) => {
         mediaUrls,
       });
 
-      await PagePost.create({
-        workspace: post.workspace,
-        post: post._id,
-        socialAccount: account.isConnectedPage ? undefined : account._id,
-        connectedPage: account.isConnectedPage ? account._id : undefined,
-        pageName: account.accountName,
-        pageId: account.accountId,
-        pageNumber: account.pageNumber,
-        profilePicture: account.profilePicture || account.avatar || "",
-        platformPostId: postId,
-        postLink,
-        postContent: post.content || "",
-        success: true,
+      await recordPagePost({
+        filter: post._id
+          ? { post: post._id, ...(account.isConnectedPage ? { connectedPage: account._id } : { socialAccount: account._id }) }
+          : { pageId: account.accountId, platformPostId: postId },
+        data: {
+          workspace: post.workspace,
+          post: post._id,
+          socialAccount: account.isConnectedPage ? undefined : account._id,
+          connectedPage: account.isConnectedPage ? account._id : undefined,
+          pageName: account.accountName,
+          pageId: account.accountId,
+          pageNumber: account.pageNumber,
+          profilePicture: account.profilePicture || account.avatar || "",
+          platformPostId: postId,
+          postLink,
+          postContent: post.content || "",
+          success: true,
+          error: undefined,
+        },
       });
 
       results.push({
@@ -157,17 +163,22 @@ const publishPostToFacebookPages = async (post) => {
       const message = publishErrorMessage(error, error.message);
       logger.error(`Facebook publish failed for page ${account.accountName}: ${message}`);
 
-      await PagePost.create({
-        workspace: post.workspace,
-        post: post._id,
-        socialAccount: account.isConnectedPage ? undefined : account._id,
-        connectedPage: account.isConnectedPage ? account._id : undefined,
-        pageName: account.accountName,
-        pageId: account.accountId,
-        pageNumber: account.pageNumber,
-        profilePicture: account.profilePicture || account.avatar || "",
-        success: false,
-        error: message,
+      await recordPagePost({
+        filter: post._id
+          ? { post: post._id, ...(account.isConnectedPage ? { connectedPage: account._id } : { socialAccount: account._id }) }
+          : { pageId: account.accountId, success: false },
+        data: {
+          workspace: post.workspace,
+          post: post._id,
+          socialAccount: account.isConnectedPage ? undefined : account._id,
+          connectedPage: account.isConnectedPage ? account._id : undefined,
+          pageName: account.accountName,
+          pageId: account.accountId,
+          pageNumber: account.pageNumber,
+          profilePicture: account.profilePicture || account.avatar || "",
+          success: false,
+          error: message,
+        },
       });
 
       results.push({

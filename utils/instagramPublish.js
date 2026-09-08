@@ -6,6 +6,7 @@ import { decrypt } from "./encrypt.js";
 import { publishErrorMessage } from "./publishError.js";
 import { ensureFreshMetaTokensForAccountIds } from "./facebookTokenRefresh.js";
 import { instagramGraphBase, waitForInstagramContainer, ensureFreshInstagramLoginTokensForAccountIds } from "./instagram.js";
+import { recordPagePost } from "./pagePostRecord.js";
 import logger from "./logger.js";
 
 const getInstagramPermalink = async (mediaId, accessToken, graphBase) => {
@@ -112,17 +113,20 @@ const publishPostToInstagramAccounts = async (post) => {
     } catch (error) {
       const message = publishErrorMessage(error, error.message);
       logger.error(`Instagram publish failed for ${account.accountName}: ${message}`);
-      await PagePost.create({
-        workspace: post.workspace,
-        post: post._id,
-        socialAccount: account._id,
-        pageName: account.accountName,
-        pageId: account.accountId,
-        platform: "instagram",
-        postContent: post.content || "",
-        profilePicture: account.avatar || "",
-        success: false,
-        error: message,
+      await recordPagePost({
+        filter: { post: post._id, socialAccount: account._id },
+        data: {
+          workspace: post.workspace,
+          post: post._id,
+          socialAccount: account._id,
+          pageName: account.accountName,
+          pageId: account.accountId,
+          platform: "instagram",
+          postContent: post.content || "",
+          profilePicture: account.avatar || "",
+          success: false,
+          error: message,
+        },
       });
       results.push({ success: false, accountId: account._id, accountName: account.accountName, error: message });
     }

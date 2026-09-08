@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import dns from "dns";
 import logger from "../utils/logger.js";
 import { getMongoUrl } from "../utils/env.js";
+import { ensurePagePostIndexes } from "../models/pagePost.model.js";
 /**
  * On some Windows/VPN/router setups, Node's own DNS resolver fails to resolve
  * the `_mongodb._tcp.*` SRV record used by `mongodb+srv://` URIs (ECONNREFUSED),
@@ -30,6 +31,11 @@ const connectDB = async () => {
       serverSelectionTimeoutMS: 10000,
     });
     logger.info(`MongoDB connected: ${conn.connection.host}/${conn.connection.name}`);
+    try {
+      await ensurePagePostIndexes();
+    } catch (indexError) {
+      logger.warn(`PagePost index repair skipped: ${indexError.message}`);
+    }
   } catch (error) {
     logger.error(`MongoDB connection failed: ${error.message}`);
     throw error;

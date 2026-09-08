@@ -2,12 +2,12 @@ import axios from "axios";
 import fs from "fs";
 import FormData from "form-data";
 import ConnectedPage from "../models/connectedPage.model.js";
-import PagePost from "../models/pagePost.model.js";
 import Media from "../models/media.model.js";
 import { decrypt } from "./encrypt.js";
 import { buildFacebookPostLink } from "./facebookPostLink.js";
 import { publishErrorMessage } from "./publishError.js";
 import { ensureFreshDatasetTokensForPages } from "./facebookTokenRefresh.js";
+import { recordPagePost } from "./pagePostRecord.js";
 import logger from "./logger.js";
 
 const FB_GRAPH_VERSION = "v19.0";
@@ -133,18 +133,22 @@ const executeBulkPublish = async ({
         mediaUrl,
       });
 
-      await PagePost.create({
-        workspace: workspaceId,
-        connectedPage: page._id,
-        secretKey: secretKey.trim(),
-        pageNumber: page.pageNumber,
-        pageName: page.pageName,
-        pageId: page.pageId,
-        profilePicture: page.profilePicture,
-        platformPostId: postId,
-        postLink,
-        postContent: content,
-        success: true,
+      await recordPagePost({
+        filter: { connectedPage: page._id, platformPostId: postId },
+        data: {
+          workspace: workspaceId,
+          connectedPage: page._id,
+          secretKey: secretKey.trim(),
+          pageNumber: page.pageNumber,
+          pageName: page.pageName,
+          pageId: page.pageId,
+          profilePicture: page.profilePicture,
+          platformPostId: postId,
+          postLink,
+          postContent: content,
+          success: true,
+          error: undefined,
+        },
       });
 
       results.push({
@@ -158,17 +162,20 @@ const executeBulkPublish = async ({
       const message = publishErrorMessage(error, error.message);
       logger.error(`Bulk publish failed for page #${page.pageNumber}: ${message}`);
 
-      await PagePost.create({
-        workspace: workspaceId,
-        connectedPage: page._id,
-        secretKey: secretKey.trim(),
-        pageNumber: page.pageNumber,
-        pageName: page.pageName,
-        pageId: page.pageId,
-        profilePicture: page.profilePicture,
-        postContent: content,
-        success: false,
-        error: message,
+      await recordPagePost({
+        filter: { connectedPage: page._id, secretKey: secretKey.trim(), success: false },
+        data: {
+          workspace: workspaceId,
+          connectedPage: page._id,
+          secretKey: secretKey.trim(),
+          pageNumber: page.pageNumber,
+          pageName: page.pageName,
+          pageId: page.pageId,
+          profilePicture: page.profilePicture,
+          postContent: content,
+          success: false,
+          error: message,
+        },
       });
 
       results.push({
