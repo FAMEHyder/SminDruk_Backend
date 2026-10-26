@@ -11,8 +11,10 @@ const errorHandler = (err, req, res, _next) => {
   let error = err;
 
   if (!(error instanceof ApiError)) {
-    const statusCode = error.statusCode || 500;
-    error = new ApiError(statusCode, error.message || "Internal server error", [], err.stack);
+    const isDbError = error?.name === "MongooseServerSelectionError" || error?.name === "MongooseError" || String(error?.message).includes("querySrv");
+    const statusCode = error.statusCode || (isDbError ? 503 : 500);
+    const message = isDbError ? `Database Error: ${error.message}` : (error.message || "Internal server error");
+    error = new ApiError(statusCode, message, [], err.stack);
   }
 
   logger.error(`${req.method} ${req.originalUrl} -> ${error.statusCode} ${error.message}`);
@@ -22,7 +24,7 @@ const errorHandler = (err, req, res, _next) => {
     statusCode: error.statusCode,
     message: error.message,
     errors: error.errors || [],
-    ...(process.env.NODE_ENV === "development" ? { stack: error.stack } : {}),
+    stack: error.stack,
   });
 };
 

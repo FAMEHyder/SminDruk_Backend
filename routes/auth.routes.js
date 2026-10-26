@@ -38,19 +38,26 @@ const rememberOAuthReturnTo = (req, res, next) => {
   next();
 };
 
-const oauthFailureRedirect = (req, res) => {
+const oauthFailureRedirect = (req, res, reason = "Authentication failed") => {
   const frontend = resolveOAuthFrontendUrl(req);
   res.clearCookie(OAUTH_RETURN_COOKIE, { path: "/" });
-  return res.redirect(`${frontend}/login?oauth=error`);
+  const cleanReason = String(reason || "OAuth failed").replace(/[\r\n]+/g, " ").slice(0, 300);
+  logger.error(`OAuth failure redirect: ${cleanReason}`);
+  return res.redirect(`${frontend}/login?oauth=error&reason=${encodeURIComponent(cleanReason)}`);
 };
 
 /** Custom passport callback so failure can honor the oauth_return_to cookie. */
 const authenticateOAuth = (strategy, options = {}) => (req, res, next) => {
+  if (req.query?.error) {
+    const errDesc = req.query.error_description || req.query.error;
+    return oauthFailureRedirect(req, res, `Google OAuth: ${errDesc}`);
+  }
   passport.authenticate(strategy, { session: false, ...options }, (err, user, info) => {
     if (err || !user) {
-      logger.error(`OAuth failure for ${strategy}: ${err?.message || (typeof info === "string" ? info : JSON.stringify(info)) || "User not found"}`);
+      const msg = err?.message || info?.message || (typeof info === "string" ? info : null) || "Provider did not return a user";
+      logger.error(`OAuth failure for ${strategy}: ${msg}`);
       if (err?.stack) logger.error(err.stack);
-      return oauthFailureRedirect(req, res);
+      return oauthFailureRedirect(req, res, msg);
     }
     req.user = user;
     return next();
