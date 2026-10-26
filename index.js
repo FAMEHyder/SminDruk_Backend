@@ -14,6 +14,7 @@ dotenv.config({
 const app = express();
 const PORT = Number(process.env.PORT) || 5000;
 let isReady = false;
+let bootstrapError = null;
 
 // Railway probes this path during deploy — must respond before heavy startup work finishes.
 app.get("/health", (_req, res) => {
@@ -21,6 +22,7 @@ app.get("/health", (_req, res) => {
     status: isReady ? "ok" : "starting",
     service: "smindruk-backend",
     ready: isReady,
+    error: bootstrapError ? bootstrapError.message : null,
   });
 });
 
@@ -39,6 +41,7 @@ const server = app.listen(PORT, "0.0.0.0", () => {
   import("./bootstrap.js")
     .then(({ bootstrap }) => bootstrap(app, () => { isReady = true; }))
     .catch((error) => {
+      bootstrapError = error;
       logger.error(`Bootstrap failed: ${error.message}`);
       logger.error(error.stack);
     });
