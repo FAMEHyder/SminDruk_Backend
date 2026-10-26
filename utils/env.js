@@ -8,7 +8,7 @@ const trimTrailingSlash = (value) => (value ? value.replace(/\/+$/, "") : value)
 /** Reads an env var (with optional fallbacks), trimming whitespace from key and value. */
 const getEnv = (...keys) => {
   for (const key of keys) {
-    const value = process.env[key]?.trim();
+    let value = process.env[key]?.trim();
     if (value) {
       if (value.includes("smindruk.up.railway.app")) {
         value = value.replaceAll("smindruk.up.railway.app", "smindruk-backend.onrender.com");
