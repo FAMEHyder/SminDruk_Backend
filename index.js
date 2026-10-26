@@ -39,7 +39,7 @@ const server = app.listen(PORT, "0.0.0.0", () => {
   }
 
   import("./bootstrap.js")
-    .then(({ bootstrap }) => bootstrap(app, () => { isReady = true; }))
+    .then(({ bootstrap }) => bootstrap(app, () => { isReady = true; }, (err) => { bootstrapError = err; }))
     .catch((error) => {
       bootstrapError = error;
       logger.error(`Bootstrap failed: ${error.message}`);

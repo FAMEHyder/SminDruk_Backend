@@ -89,7 +89,7 @@ const configureApp = (app) => {
   return allowedOrigins;
 };
 
-const bootstrap = async (app, setReady) => {
+const bootstrap = async (app, setReady, setBootstrapError) => {
   const allowedOrigins = configureApp(app);
   const envCheck = validateEnv();
 
@@ -114,6 +114,7 @@ const bootstrap = async (app, setReady) => {
         : "Email is not configured — Railway needs EmailJS keys or BREVO_API_KEY (Gmail SMTP is blocked)."
     );
   } catch (error) {
+    if (typeof setBootstrapError === "function") setBootstrapError(error);
     logger.error(`Database startup failed: ${error.message}`);
     logger.error("Health check stays alive — fix MONGO_URL in Railway Variables and redeploy.");
   }

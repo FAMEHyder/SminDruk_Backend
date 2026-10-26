@@ -80,6 +80,17 @@ const getGoogleClientSecret = () => getEnv("GOOGLE_CLIENT_SECRET", "Google_Clien
  * https://smindruk-backend.onrender.com/api/v1/auth/callback/google
  */
 const getGoogleCallbackUrl = () => {
+  if (!isProduction()) {
+    const localCallback = getEnv("GOOGLE_CALLBACK_URL_LOCAL");
+    if (localCallback?.startsWith("http")) return trimTrailingSlash(localCallback);
+    const fromEnv = getEnv("GOOGLE_CALLBACK_URL", "Google_Redirect_URI", "GOOGLE_REDIRECT_URI");
+    if (fromEnv?.startsWith("http") && (fromEnv.includes("localhost") || fromEnv.includes("127.0.0.1"))) {
+      return trimTrailingSlash(fromEnv);
+    }
+    const path = fromEnv?.startsWith("/") ? fromEnv : "/api/v1/auth/callback/google";
+    return `${getLocalApiUrl()}${path}`;
+  }
+
   const fromEnv = getEnv("GOOGLE_CALLBACK_URL", "Google_Redirect_URI", "GOOGLE_REDIRECT_URI");
   if (fromEnv?.startsWith("http")) return trimTrailingSlash(fromEnv);
 

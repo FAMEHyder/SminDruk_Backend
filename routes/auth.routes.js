@@ -1,3 +1,4 @@
+import logger from "../utils/logger.js";
 import { authValidators } from "../utils/validators.js";
 import { authLimiter } from "../middleware/rateLimiter.middleware.js";
 import {
@@ -45,8 +46,12 @@ const oauthFailureRedirect = (req, res) => {
 
 /** Custom passport callback so failure can honor the oauth_return_to cookie. */
 const authenticateOAuth = (strategy, options = {}) => (req, res, next) => {
-  passport.authenticate(strategy, { session: false, ...options }, (err, user) => {
-    if (err || !user) return oauthFailureRedirect(req, res);
+  passport.authenticate(strategy, { session: false, ...options }, (err, user, info) => {
+    if (err || !user) {
+      logger.error(`OAuth failure for ${strategy}: ${err?.message || (typeof info === "string" ? info : JSON.stringify(info)) || "User not found"}`);
+      if (err?.stack) logger.error(err.stack);
+      return oauthFailureRedirect(req, res);
+    }
     req.user = user;
     return next();
   })(req, res, next);
