@@ -9,7 +9,12 @@ const trimTrailingSlash = (value) => (value ? value.replace(/\/+$/, "") : value)
 const getEnv = (...keys) => {
   for (const key of keys) {
     const value = process.env[key]?.trim();
-    if (value) return value;
+    if (value) {
+      if (value.includes("smindruk.up.railway.app")) {
+        value = value.replaceAll("smindruk.up.railway.app", "smindruk-backend.onrender.com");
+      }
+      return value;
+    }
   }
   return undefined;
 };
