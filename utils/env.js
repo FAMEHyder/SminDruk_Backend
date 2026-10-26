@@ -72,7 +72,7 @@ const getGoogleClientSecret = () => getEnv("GOOGLE_CLIENT_SECRET", "Google_Clien
 /**
  * Google OAuth callback URI — must match Google Cloud Console exactly.
  * Always the live Railway URI (never localhost).
- * https://smindruk.up.railway.app/api/v1/auth/callback/google
+ * https://smindruk-backend.onrender.com/api/v1/auth/callback/google
  */
 const getGoogleCallbackUrl = () => {
   const fromEnv = getEnv("GOOGLE_CALLBACK_URL", "Google_Redirect_URI", "GOOGLE_REDIRECT_URI");
