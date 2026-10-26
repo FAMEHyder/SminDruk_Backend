@@ -15,7 +15,7 @@ const getEnv = (...keys) => {
 };
 
 const DEFAULT_LOCAL_API = "http://localhost:8000";
-const DEFAULT_LIVE_API = "https://smindruk.up.railway.app";
+const DEFAULT_LIVE_API = "https://smindruk-backend.onrender.com";
 const DEFAULT_LOCAL_FRONTEND = "http://localhost:3000";
 const DEFAULT_LIVE_FRONTEND = "https://smindruk.vercel.app";
 const DEFAULT_LIVE_ADMIN = "https://dashboard-smindruk.vercel.app";
