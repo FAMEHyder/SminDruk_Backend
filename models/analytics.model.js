@@ -7,7 +7,7 @@ const analyticsSchema = new mongoose.Schema(
     post: { type: mongoose.Schema.Types.ObjectId, ref: "Post" },
     platform: {
       type: String,
-      enum: ["facebook", "instagram", "linkedin", "x", "tiktok", "pinterest"],
+      enum: ["facebook", "instagram", "linkedin", "x", "threads", "tiktok", "pinterest"],
       required: true,
     },
     date: { type: Date, required: true },

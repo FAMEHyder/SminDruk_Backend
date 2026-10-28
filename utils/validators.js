@@ -74,7 +74,7 @@ const postValidators = {
     workspaceId: z.string().min(1),
     type: z.enum(["text", "image", "carousel", "video", "reel", "story"]),
     content: z.string().max(2200).optional(),
-    platforms: z.array(z.enum(["facebook", "instagram", "linkedin", "x", "tiktok", "pinterest"])).min(1),
+    platforms: z.array(z.enum(["facebook", "instagram", "linkedin", "x", "threads", "tiktok", "pinterest"])).min(1),
     mediaIds: z.array(z.string()).optional(),
     socialAccountIds: z.array(z.string()).optional(),
     scheduledAt: z.string().datetime().optional(),

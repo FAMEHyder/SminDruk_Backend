@@ -14,7 +14,7 @@ const postSchema = new mongoose.Schema(
     platforms: [
       {
         type: String,
-        enum: ["facebook", "instagram", "linkedin", "x", "tiktok", "pinterest"],
+        enum: ["facebook", "instagram", "linkedin", "x", "threads", "tiktok", "pinterest"],
       },
     ],
     socialAccounts: [{ type: mongoose.Schema.Types.ObjectId, ref: "SocialAccount" }],

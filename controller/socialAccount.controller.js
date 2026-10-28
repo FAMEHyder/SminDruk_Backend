@@ -29,6 +29,17 @@ import {
   refreshInstagramLoginToken,
   runInstagramLoginTokenRefreshJob,
 } from "../utils/instagram.js";
+import {
+  createThreadsAuthorizationUrl,
+  exchangeThreadsCode,
+  getThreadsAppId,
+  getThreadsAppSecret,
+  getThreadsCallbackUrl,
+  parseSignedRequest,
+  refreshThreadsToken,
+  runThreadsTokenRefreshJob,
+  threadsApiError,
+} from "../utils/threads.js";
 import logger from "../utils/logger.js";
 
 /**
@@ -417,6 +428,138 @@ const linkedInConnectCallback = asyncHandler(async (req, res) => {
   }
 });
 
+// GET /api/v1/social-accounts/threads/connect?workspaceId=&userId=&returnTo=
+const threadsConnectStart = (req, res) => {
+  const { workspaceId, userId, returnTo, connectMode = "manage" } = req.query;
+  if (!workspaceId || !userId) {
+    throw ApiError.badRequest("workspaceId and userId are required to start the Threads connection.");
+  }
+
+  const clientId = getThreadsAppId();
+  if (!clientId) {
+    throw ApiError.badRequest("Threads App ID is not configured. Set Threads_app_ID in .env.");
+  }
+
+  const frontendUrl = typeof returnTo === "string" ? trimTrailingSlash(returnTo) : "";
+  const safeReturnTo = getAllowedOrigins().has(frontendUrl) ? frontendUrl : getFrontendUrl();
+  const state = encodeURIComponent(
+    JSON.stringify({
+      workspaceId,
+      userId,
+      returnTo: safeReturnTo,
+      connectMode: connectMode === "dataset" ? "dataset" : "manage",
+      nonce: crypto.randomUUID(),
+    })
+  );
+  const redirectUri = getThreadsCallbackUrl();
+  return res.redirect(createThreadsAuthorizationUrl({ clientId, redirectUri, state }));
+};
+
+// GET /api/v1/social-accounts/threads/callback
+const threadsConnectCallback = asyncHandler(async (req, res) => {
+  const { code, state, error: threadsError } = req.query;
+  let returnTo = getFrontendUrl();
+
+  if (threadsError || !code || !state) {
+    const reason = typeof req.query.error_description === "string" ? req.query.error_description : "Threads authorization was cancelled.";
+    return res.redirect(`${returnTo}/dashboard/connect-channels?threads=error&reason=${encodeURIComponent(reason)}`);
+  }
+
+  try {
+    const parsed = JSON.parse(decodeURIComponent(state));
+    const requestedReturnTo = trimTrailingSlash(parsed.returnTo);
+    returnTo = getAllowedOrigins().has(requestedReturnTo) ? requestedReturnTo : returnTo;
+    const connectSource = parsed.connectMode === "dataset" ? "dataset" : "manage";
+    const redirectUri = getThreadsCallbackUrl();
+
+    const profile = await exchangeThreadsCode({
+      code: String(code),
+      redirectUri,
+    });
+
+    const tokenIssuedAt = new Date();
+    const tokenExpiresAt = new Date(Date.now() + (profile.expiresIn || FB_PAGE_TOKEN_TTL_DAYS * 24 * 60 * 60) * 1000);
+
+    await SocialAccount.findOneAndUpdate(
+      { workspace: parsed.workspaceId, platform: "threads", accountId: profile.accountId },
+      {
+        workspace: parsed.workspaceId,
+        connectedBy: parsed.userId,
+        platform: "threads",
+        accountId: profile.accountId,
+        accountName: profile.accountName,
+        username: profile.username,
+        avatar: profile.avatar,
+        category: profile.category || "",
+        accessToken: encrypt(profile.accessToken),
+        userAccessToken: encrypt(profile.accessToken),
+        tokenIssuedAt,
+        tokenExpiresAt,
+        status: "connected",
+        connectSource,
+        lastSyncedAt: new Date(),
+        lastTokenRefreshAttemptAt: null,
+        lastTokenRefreshError: null,
+      },
+      { upsert: true, new: true }
+    );
+
+    return res.redirect(`${returnTo}/dashboard/connect-channels?threads=connected`);
+  } catch (connectError) {
+    const reason = threadsApiError(connectError, connectError.message || "Could not connect this Threads account.");
+    logger.error(`Threads connect callback failed: ${reason}`);
+    return res.redirect(`${returnTo}/dashboard/connect-channels?threads=error&reason=${encodeURIComponent(reason)}`);
+  }
+});
+
+// ALL /api/v1/social-accounts/threads/uninstall
+const threadsUninstallCallback = asyncHandler(async (req, res) => {
+  if (req.method === "GET") {
+    return res.status(200).json({ status: "ok", message: "Threads uninstall callback is active." });
+  }
+
+  const signedRequest = req.body?.signed_request || req.query?.signed_request;
+  const data = parseSignedRequest(signedRequest, getThreadsAppSecret());
+  const userId = data?.user_id;
+
+  if (userId) {
+    await SocialAccount.updateMany(
+      { platform: "threads", accountId: String(userId) },
+      { status: "disconnected", lastSyncedAt: new Date() }
+    );
+    logger.info(`Threads account ${userId} marked disconnected via deauth webhook.`);
+  }
+
+  return res.status(200).json({ success: true, message: "Threads account uninstalled successfully." });
+});
+
+// ALL /api/v1/social-accounts/threads/delete
+const threadsDeleteCallback = asyncHandler(async (req, res) => {
+  if (req.method === "GET") {
+    return res.status(200).json({ status: "ok", message: "Threads data deletion callback is active." });
+  }
+
+  const signedRequest = req.body?.signed_request || req.query?.signed_request;
+  const data = parseSignedRequest(signedRequest, getThreadsAppSecret());
+  const userId = data?.user_id;
+
+  if (userId) {
+    await SocialAccount.updateMany(
+      { platform: "threads", accountId: String(userId) },
+      { status: "disconnected", lastSyncedAt: new Date() }
+    );
+    logger.info(`Threads user ${userId} requested data deletion.`);
+  }
+
+  const confirmationCode = `threads_del_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
+  const statusUrl = `${getFrontendUrl()}/data-deletion?code=${confirmationCode}`;
+
+  return res.status(200).json({
+    url: statusUrl,
+    confirmation_code: confirmationCode,
+  });
+});
+
 // GET /api/v1/social-accounts/facebook/connect?workspaceId=&userId=&connectMode=
 const facebookConnectStart = (req, res) => {
   const { workspaceId, userId, connectMode = "manage" } = req.query;
@@ -752,8 +895,12 @@ const refreshAccountToken = asyncHandler(async (req, res) => {
     const result = await refreshInstagramLoginToken(account._id);
     return new ApiResponse(200, "Instagram account tokens refreshed successfully.", result).send(res);
   }
-  if (!["facebook", "instagram"].includes(account.platform)) {
-    throw ApiError.badRequest("Manual token refresh is only supported for Facebook, Instagram, LinkedIn, and X accounts.");
+  if (account.platform === "threads") {
+    const result = await refreshThreadsToken(account._id);
+    return new ApiResponse(200, "Threads account tokens refreshed successfully.", result).send(res);
+  }
+  if (!["facebook", "instagram", "threads"].includes(account.platform)) {
+    throw ApiError.badRequest("Manual token refresh is only supported for Facebook, Instagram, LinkedIn, X, and Threads accounts.");
   }
 
   const result = await refreshFacebookTokensForAccount(account._id);
@@ -801,13 +948,14 @@ const cronRefreshTokens = asyncHandler(async (req, res) => {
     throw ApiError.unauthorized("Invalid cron secret.");
   }
 
-  const [facebook, x, linkedin, instagram] = await Promise.all([
+  const [facebook, x, linkedin, instagram, threads] = await Promise.all([
     runFacebookTokenRefreshJob(),
     runXTokenRefreshJob(),
     runLinkedInTokenRefreshJob(),
     runInstagramLoginTokenRefreshJob(),
+    runThreadsTokenRefreshJob(),
   ]);
-  return new ApiResponse(200, "Social token refresh job completed.", { facebook, x, linkedin, instagram }).send(res);
+  return new ApiResponse(200, "Social token refresh job completed.", { facebook, x, linkedin, instagram, threads }).send(res);
 });
 
 export {
@@ -823,6 +971,10 @@ export {
   instagramConnectCallback,
   linkedInConnectStart,
   linkedInConnectCallback,
+  threadsConnectStart,
+  threadsConnectCallback,
+  threadsUninstallCallback,
+  threadsDeleteCallback,
   xConnectStart,
   xConnectCallback,
   xErrorDiagnostic,

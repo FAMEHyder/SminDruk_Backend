@@ -2,6 +2,7 @@ import Post from "../models/post.model.js";
 import { publishPostToFacebookPages } from "./facebookPublish.js";
 import { publishPostToInstagramAccounts } from "./instagramPublish.js";
 import { publishPostToLinkedInAccounts } from "./linkedinPublish.js";
+import { publishPostToThreadsAccounts } from "./threadsPublish.js";
 import { publishPostToXAccounts } from "./xPublish.js";
 import { publishErrorMessage } from "./publishError.js";
 
@@ -78,7 +79,21 @@ const executePublish = async (post) => {
     }
   }
 
-  const unsupported = post.platforms.filter((platform) => !["facebook", "instagram", "linkedin", "x"].includes(platform));
+  if (post.platforms.includes("threads")) {
+    const { results } = await publishPostToThreadsAccounts(post);
+    for (const result of results) {
+      if (result.success && result.postId) {
+        post.platformPostIds.set(`threads_${result.accountId}`, result.postId);
+      } else if (!result.success) {
+        failures.push(`${result.accountName}: ${result.error}`);
+      }
+    }
+    if (results.length > 0 && results.every((result) => !result.success)) {
+      throw new Error(publishErrorMessage(failures[0] || "Threads publish failed for all selected accounts."));
+    }
+  }
+
+  const unsupported = post.platforms.filter((platform) => !["facebook", "instagram", "linkedin", "x", "threads"].includes(platform));
   if (unsupported.length > 0) {
     failures.push(`Not yet supported: ${unsupported.join(", ")}`);
   }

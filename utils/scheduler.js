@@ -8,6 +8,7 @@ import { ensureFreshMetaTokensForAccountIds, ensureFreshDatasetTokensForPages, r
 import { runXTokenRefreshJob, refreshXTokensForAccount } from "./x.js";
 import { runLinkedInTokenRefreshJob, refreshLinkedInTokensForAccount } from "./linkedinTokenRefresh.js";
 import { runInstagramLoginTokenRefreshJob, refreshInstagramLoginToken } from "./instagram.js";
+import { runThreadsTokenRefreshJob, refreshThreadsToken } from "./threads.js";
 import { purgeExpiredPasswordResets } from "./passwordReset.js";
 import { isReconnectRequiredError, publishErrorMessage } from "./publishError.js";
 import { isWithinTokenCronLifetime } from "./tokenRefreshStatus.js";
@@ -47,6 +48,11 @@ const refreshSocialTokensForPost = async (post) => {
     accounts
       .filter((account) => account.platform === "instagram" && account.authSource === "instagram_login")
       .map((account) => refreshInstagramLoginToken(account._id).catch(() => null))
+  );
+  await Promise.allSettled(
+    accounts
+      .filter((account) => account.platform === "threads")
+      .map((account) => refreshThreadsToken(account._id).catch(() => null))
   );
 
   return true;
@@ -319,12 +325,15 @@ const startScheduler = () => {
       runInstagramLoginTokenRefreshJob().catch((error) =>
         logger.error(`Instagram login token refresh job crashed: ${error.message}`)
       );
+      runThreadsTokenRefreshJob().catch((error) =>
+        logger.error(`Threads token refresh job crashed: ${error.message}`)
+      );
     },
     { timezone: cronTimezone }
   );
 
   logger.info("Post scheduler started (running every minute).");
-  logger.info(`Facebook, X, LinkedIn, and Instagram token refresh scheduled: ${tokenRefreshCron} (${cronTimezone}).`);
+  logger.info(`Facebook, X, LinkedIn, Instagram, and Threads token refresh scheduled: ${tokenRefreshCron} (${cronTimezone}).`);
 
   runScheduledPostsJob().catch((error) =>
     logger.error(`Initial scheduler run failed: ${error.message}`)
@@ -344,9 +353,12 @@ const startScheduler = () => {
   runInstagramLoginTokenRefreshJob().catch((error) =>
     logger.error(`Initial Instagram login token refresh check failed: ${error.message}`)
   );
+  runThreadsTokenRefreshJob().catch((error) =>
+    logger.error(`Initial Threads token refresh check failed: ${error.message}`)
+  );
   purgeExpiredPasswordResets().catch((error) =>
     logger.error(`Initial password OTP cleanup failed: ${error.message}`)
   );
 };
 
-export { startScheduler, runScheduledPostsJob, runScheduledBulkPostsJob, runFacebookTokenRefreshJob, runXTokenRefreshJob, runLinkedInTokenRefreshJob };
+export { startScheduler, runScheduledPostsJob, runScheduledBulkPostsJob, runFacebookTokenRefreshJob, runXTokenRefreshJob, runLinkedInTokenRefreshJob, runThreadsTokenRefreshJob };
