@@ -217,7 +217,7 @@ const exchangeInstagramLoginCode = async ({ code, redirectUri }) => {
 };
 
 const refreshInstagramLoginToken = async (accountId) => {
-  const account = await SocialAccount.findById(accountId).select("+accessToken authSource");
+  const account = await SocialAccount.findById(accountId).select("+accessToken");
   if (!account || account.platform !== "instagram" || account.authSource !== "instagram_login") {
     throw new Error("Instagram login account not found.");
   }
@@ -292,7 +292,7 @@ const ensureFreshInstagramLoginTokensForAccountIds = async (accountIds) => {
 };
 
 const waitForInstagramContainer = async (graphBase, containerId, accessToken) => {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
     const { data } = await axios.get(`${graphBase}/${containerId}`, {
       params: { fields: "status_code,status", access_token: accessToken },
     });
@@ -302,6 +302,7 @@ const waitForInstagramContainer = async (graphBase, containerId, accessToken) =>
     }
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
+  throw new Error("Instagram took too long to process this media container. Please try again.");
 };
 
 export {

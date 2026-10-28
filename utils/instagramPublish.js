@@ -21,21 +21,25 @@ const getInstagramPermalink = async (mediaId, accessToken, graphBase) => {
 };
 
 const createContainer = async ({ graphBase, accountId, accessToken, content, media, isCarouselItem = false }) => {
+  const isVideo = media.fileType === "video";
   const params = {
     access_token: accessToken,
-    caption: isCarouselItem ? undefined : content,
-    ...(media.fileType === "video"
-      ? { media_type: "REELS", video_url: media.url }
+    caption: isCarouselItem ? undefined : (content || ""),
+    ...(isVideo
+      ? { media_type: isCarouselItem ? "VIDEO" : "REELS", video_url: media.url }
       : { image_url: media.url }),
     ...(isCarouselItem ? { is_carousel_item: true } : {}),
   };
   const { data } = await axios.post(`${graphBase}/${accountId}/media`, params);
-  if (!data.id) throw new Error("Instagram did not return a media container ID.");
+  if (!data?.id) throw new Error("Instagram did not return a media container ID.");
   await waitForInstagramContainer(graphBase, data.id, accessToken);
   return data.id;
 };
 
 const publishToInstagramAccount = async ({ account, content, media }) => {
+  if (!account?.accountId) {
+    throw new Error(`Instagram account "${account?.accountName || "selected"}" is missing an account ID. Please reconnect your account.`);
+  }
   if (!media.length) throw new Error("Instagram posts require at least one image or video.");
   if (media.length > 10) throw new Error("Instagram supports up to 10 items in a carousel.");
   if (media.filter((item) => item.fileType === "video").length > 1 || (media.length > 1 && media.some((item) => item.fileType === "video"))) {
@@ -54,9 +58,10 @@ const publishToInstagramAccount = async ({ account, content, media }) => {
     const { data } = await axios.post(`${graphBase}/${account.accountId}/media`, {
       access_token: accessToken,
       media_type: "CAROUSEL",
-      caption: content,
-      children,
+      caption: content || "",
+      children: children.join(","),
     });
+    if (!data?.id) throw new Error("Instagram did not return a carousel container ID.");
     containerId = data.id;
     await waitForInstagramContainer(graphBase, containerId, accessToken);
   }
@@ -65,7 +70,7 @@ const publishToInstagramAccount = async ({ account, content, media }) => {
     access_token: accessToken,
     creation_id: containerId,
   });
-  if (!data.id) throw new Error("Instagram did not return a published media ID.");
+  if (!data?.id) throw new Error("Instagram did not return a published media ID.");
   return { postId: data.id, postLink: await getInstagramPermalink(data.id, accessToken, graphBase) };
 };
 
@@ -81,7 +86,7 @@ const publishPostToInstagramAccounts = async (post) => {
     workspace: post.workspace?._id ?? post.workspace,
     platform: "instagram",
     status: "connected",
-  }).select("+accessToken authSource");
+  }).select("+accessToken");
   if (!accounts.length) throw new Error("Selected Instagram accounts were not found or are disconnected.");
 
   let media = post.media;
