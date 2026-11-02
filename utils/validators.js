@@ -10,8 +10,8 @@ const personNameSchema = z
   .min(1, "Name is required")
   .max(50, "Name must be 50 characters or less")
   .regex(/^[A-Za-z]+(?:[ '\-][A-Za-z]+)*$/, "Name can only contain letters (no numbers)")
-  .refine((value) => (value.match(/[A-Za-z]/g) || []).length > 3, {
-    message: "Name must be more than 3 letters",
+  .refine((value) => (value.match(/[A-Za-z]/g) || []).length >= 3, {
+    message: "Name must be at least 3 letters",
   });
 
 const authValidators = {
