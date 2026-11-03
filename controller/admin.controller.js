@@ -1,3 +1,6 @@
+import mongoose from "mongoose";
+import logger from "../utils/logger.js";
+import { getPlan } from "../utils/subscriptionPlans.js";
 import crypto from "crypto";
 import { PLAN_LIMITS } from "./subscription.controller.js";
 import asyncHandler from "../utils/asyncHandler.js";
@@ -947,44 +950,78 @@ const reviewManualPayment = asyncHandler(async (req, res) => {
     throw ApiError.badRequest("Decision must be approve or reject.");
   }
 
-  const payment = await Payment.findOne({
-    _id: req.params.id,
-    gateway: "manual",
-    status: "pending",
-  });
-  if (!payment) throw ApiError.notFound("Pending manual payment not found.");
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    throw ApiError.badRequest("Invalid payment ID format.");
+  }
+
+  const payment = await Payment.findById(req.params.id);
+  if (!payment) {
+    throw ApiError.notFound("Payment record not found.");
+  }
+
+  if (payment.gateway !== "manual") {
+    throw ApiError.badRequest("Only manual payments can be approved or rejected.");
+  }
+
+  if (payment.status !== "pending") {
+    throw ApiError.badRequest(
+      `This payment has already been ${payment.status === "succeeded" ? "approved" : payment.status}.`
+    );
+  }
 
   payment.status = decision === "approve" ? "succeeded" : "failed";
   payment.reviewedBy = req.user._id;
   payment.reviewedAt = new Date();
   payment.reviewNote = String(reviewNote).trim().slice(0, 1000);
-  await payment.save();
 
   if (decision === "approve") {
     const periodEnd = new Date();
     periodEnd.setMonth(periodEnd.getMonth() + 1);
+
+    const limits = PLAN_LIMITS[payment.plan] || getPlan(payment.plan)?.limits || PLAN_LIMITS.free;
+
     const subscription = await Subscription.findOneAndUpdate(
       { workspace: payment.workspace },
       {
         plan: payment.plan,
         status: "active",
+        billingCycle: "monthly",
         startedAt: new Date(),
         currentPeriodEnd: periodEnd,
-        limits: PLAN_LIMITS[payment.plan],
+        trialUsed: true,
+        trialEndsAt: null,
+        limits,
       },
-      { new: true, upsert: true }
+      { new: true, upsert: true, setDefaultsOnInsert: true }
     );
+
     await Workspace.findByIdAndUpdate(payment.workspace, { plan: payment.plan });
     payment.subscription = subscription._id;
-    await payment.save();
   }
 
-  await AuditLog.create({
-    user: req.user._id,
-    event: `manual_payment_${decision}d`,
-    description: `Manual ${payment.plan} payment ${decision}d`,
-    metadata: { paymentId: payment._id, workspaceId: payment.workspace, reviewNote: payment.reviewNote },
-  });
+  await payment.save();
+  await payment.populate("workspace", "name");
+
+  try {
+    await AuditLog.create({
+      user: req.user._id,
+      workspace: payment.workspace?._id || payment.workspace,
+      event: `manual_payment_${decision}d`,
+      description: `Manual ${payment.plan} payment ${decision}d${payment.reviewNote ? `: ${payment.reviewNote}` : ""}`,
+      ipAddress: req.ip,
+      userAgent: req.headers["user-agent"],
+      metadata: {
+        paymentId: payment._id,
+        workspaceId: payment.workspace?._id || payment.workspace,
+        decision,
+        reviewNote: payment.reviewNote,
+        plan: payment.plan,
+        amount: payment.amount,
+      },
+    });
+  } catch (logErr) {
+    logger.warn(`Failed to create audit log for payment review: ${logErr.message}`);
+  }
 
   return new ApiResponse(
     200,

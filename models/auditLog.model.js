@@ -17,6 +17,8 @@ const auditLogSchema = new mongoose.Schema(
         "cron_job_run",
         "payment_processed",
         "subscription_changed",
+        "manual_payment_approved",
+        "manual_payment_rejected",
         "admin_action",
         "error",
       ],
