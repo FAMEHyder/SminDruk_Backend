@@ -15,7 +15,11 @@ const recordPagePost = async ({ filter, data }) => {
         return;
       }
     }
-    logger.warn(`PagePost record failed: ${error.message}`);
+    try {
+      await PagePost.create(data);
+    } catch (createErr) {
+      logger.warn(`PagePost record failed: ${error.message} (create fallback failed: ${createErr.message})`);
+    }
   }
 };
 

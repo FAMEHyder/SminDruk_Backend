@@ -10,6 +10,7 @@ router.get("/trending-meta", connectedPageController.getTrendingMeta);
 router.get("/", connectedPageController.listConnectedPages);
 router.post("/bulk-post", connectedPageController.createBulkPost);
 router.post("/posts/fetch", connectedPageController.fetchPostsBySecretKey);
+router.get("/posts/secret-keys", connectedPageController.getRecentSecretKeys);
 router.delete("/:id", connectedPageController.disconnectConnectedPage);
 
 export default router;

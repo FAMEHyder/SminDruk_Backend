@@ -5,9 +5,11 @@ import Post from "../models/post.model.js";
 import SocialAccount from "../models/socialAccount.model.js";
 import { executeBulkPublish } from "../utils/bulkFacebookPublish.js";
 import { executePublish } from "../utils/publishPost.js";
+import { buildFacebookPostLink } from "../utils/facebookPostLink.js";
 import asyncHandler from "../utils/asyncHandler.js";
 import ApiError from "../utils/apiError.js";
 import ApiResponse from "../utils/apiResponse.js";
+import logger from "../utils/logger.js";
 
 // GET /api/v1/connected-pages/trending-meta
 const getTrendingMeta = asyncHandler(async (_req, res) => {
@@ -116,6 +118,26 @@ const createBulkPost = asyncHandler(async (req, res) => {
     mediaId,
   });
 
+  try {
+    await BulkPost.create({
+      workspace: workspaceId,
+      createdBy: req.user._id,
+      secretKey: secretKey.trim(),
+      content,
+      fromPage: from,
+      toPage: to,
+      category: category?.trim() || "",
+      postType: postType || "text",
+      mediaId: mediaId || undefined,
+      scheduledAt: new Date(),
+      status: "published",
+      publishedCount: result.publishedCount,
+      failedCount: result.failedCount,
+    });
+  } catch (bulkErr) {
+    logger.warn(`BulkPost record creation skipped: ${bulkErr.message}`);
+  }
+
   return new ApiResponse(200, "Bulk post published successfully.", result).send(res);
 });
 
@@ -127,11 +149,30 @@ const fetchPostsBySecretKey = asyncHandler(async (req, res) => {
     throw ApiError.badRequest("Secret key is required.");
   }
 
-  const posts = await PagePost.find({
-    secretKey: secretKey.trim(),
+  const trimmed = secretKey.trim();
+  const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const keyRegex = new RegExp(`^${escaped}$`, "i");
+
+  // Query posts matching this secret key (case-insensitive)
+  let posts = await PagePost.find({
+    secretKey: keyRegex,
     success: true,
-    postLink: { $exists: true, $nin: [null, ""] },
   }).sort({ createdAt: -1 });
+
+  // Fallback: If no exact case-insensitive match found, try prefix search (min 4 chars) to catch minor typos
+  if (!posts.length && trimmed.length >= 4) {
+    const prefix = escaped.slice(0, Math.min(escaped.length, 5));
+    const candidate = await PagePost.findOne({
+      secretKey: new RegExp(`^${prefix}`, "i"),
+      success: true,
+    });
+    if (candidate?.secretKey) {
+      posts = await PagePost.find({
+        secretKey: candidate.secretKey,
+        success: true,
+      }).sort({ createdAt: -1 });
+    }
+  }
 
   const pageIds = [...new Set(posts.map((post) => post.pageId))];
   const pages = await ConnectedPage.find({ pageId: { $in: pageIds } }).select(
@@ -142,6 +183,11 @@ const fetchPostsBySecretKey = asyncHandler(async (req, res) => {
 
   const finalPosts = posts.map((post) => {
     const page = pageMap.get(post.pageId);
+    const postLink =
+      post.postLink ||
+      buildFacebookPostLink(post.pageId, post.platformPostId) ||
+      (post.platformPostId ? `https://www.facebook.com/${post.pageId}/posts/${post.platformPostId}` : "");
+
     return {
       _id: post._id,
       secretKey: post.secretKey,
@@ -149,7 +195,7 @@ const fetchPostsBySecretKey = asyncHandler(async (req, res) => {
       pageNumber: post.pageNumber ?? page?.pageNumber,
       pageName: post.pageName || page?.pageName || "Unknown Page",
       pageDp: post.profilePicture || page?.profilePicture || "",
-      postLink: post.postLink,
+      postLink,
       postContent: post.postContent,
       platformPostId: post.platformPostId,
       createdAt: post.createdAt,
@@ -157,6 +203,25 @@ const fetchPostsBySecretKey = asyncHandler(async (req, res) => {
   });
 
   return new ApiResponse(200, "Posts fetched successfully.", finalPosts).send(res);
+});
+
+// GET /api/v1/connected-pages/posts/secret-keys
+const getRecentSecretKeys = asyncHandler(async (req, res) => {
+  const workspaceId = req.query.workspaceId;
+  const filter = { secretKey: { $exists: true, $nin: [null, ""] } };
+  if (workspaceId) filter.workspace = workspaceId;
+
+  const [pageKeys, bulkKeys] = await Promise.all([
+    PagePost.distinct("secretKey", filter),
+    BulkPost.distinct("secretKey", filter),
+  ]);
+
+  const uniqueKeys = [...new Set([...pageKeys, ...bulkKeys])]
+    .filter(Boolean)
+    .filter((k) => typeof k === "string" && k.trim().length > 0)
+    .slice(0, 20);
+
+  return new ApiResponse(200, "Recent secret keys fetched successfully.", uniqueKeys).send(res);
 });
 
 // DELETE /api/v1/connected-pages/:id
@@ -167,4 +232,11 @@ const disconnectConnectedPage = asyncHandler(async (req, res) => {
   return new ApiResponse(200, "Connected page disconnected successfully.").send(res);
 });
 
-export { getTrendingMeta, listConnectedPages, createBulkPost, fetchPostsBySecretKey, disconnectConnectedPage };
+export {
+  getTrendingMeta,
+  listConnectedPages,
+  createBulkPost,
+  fetchPostsBySecretKey,
+  getRecentSecretKeys,
+  disconnectConnectedPage,
+};

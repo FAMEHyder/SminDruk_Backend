@@ -13,16 +13,18 @@ import logger from "./logger.js";
 const FB_GRAPH_VERSION = "v19.0";
 
 /** Random 10–15 second pause between each page publish during bulk post. */
+/** Safe 1.5–2 second pause between each page publish during bulk post to prevent HTTP timeouts. */
 const waitBetweenPages = () =>
   new Promise((resolve) =>
-    setTimeout(resolve, Math.floor(Math.random() * (15000 - 10000 + 1)) + 10000)
+    setTimeout(resolve, Math.floor(Math.random() * 500) + 1500)
   );
 
 const publishConnectedPagePost = async ({ page, content, postType, mediaPath, mediaUrl }) => {
   const token = decrypt(page.pageAccessToken);
   const pageId = page.pageId;
 
-  if ((postType === "photo" || postType === "story") && (mediaPath || mediaUrl)) {
+  const normalizedType = postType === "image" ? "photo" : postType;
+  if ((normalizedType === "photo" || normalizedType === "story") && (mediaPath || mediaUrl)) {
     if (mediaPath) {
       const form = new FormData();
       form.append("source", fs.createReadStream(mediaPath));
@@ -44,7 +46,7 @@ const publishConnectedPagePost = async ({ page, content, postType, mediaPath, me
     return { postId, postLink: buildFacebookPostLink(pageId, postId) };
   }
 
-  if ((postType === "video" || postType === "reel") && (mediaPath || mediaUrl)) {
+  if ((normalizedType === "video" || normalizedType === "reel") && (mediaPath || mediaUrl)) {
     if (mediaPath) {
       const form = new FormData();
       form.append("source", fs.createReadStream(mediaPath));
@@ -133,6 +135,8 @@ const executeBulkPublish = async ({
         mediaUrl,
       });
 
+      const finalLink = postLink || buildFacebookPostLink(page.pageId, postId) || (postId ? `https://www.facebook.com/${page.pageId}/posts/${postId}` : "");
+
       await recordPagePost({
         filter: { connectedPage: page._id, platformPostId: postId },
         data: {
@@ -144,7 +148,7 @@ const executeBulkPublish = async ({
           pageId: page.pageId,
           profilePicture: page.profilePicture,
           platformPostId: postId,
-          postLink,
+          postLink: finalLink,
           postContent: content,
           success: true,
           error: undefined,
@@ -156,7 +160,7 @@ const executeBulkPublish = async ({
         pageNumber: page.pageNumber,
         pageName: page.pageName,
         postId,
-        postLink,
+        postLink: finalLink,
       });
     } catch (error) {
       const message = publishErrorMessage(error, error.message);
