@@ -5,7 +5,10 @@ import TeamMember from "../models/teamMember.model.js";
 
 // GET /api/v1/teams/:workspaceId
 const getTeamMembers = asyncHandler(async (req, res) => {
-  const members = await TeamMember.find({ workspace: req.params.workspaceId })
+  const members = await TeamMember.find({
+    workspace: req.params.workspaceId,
+    status: { $ne: "removed" },
+  })
     .populate("user", "firstName lastName email avatar")
     .sort({ createdAt: 1 });
 
@@ -14,13 +17,16 @@ const getTeamMembers = asyncHandler(async (req, res) => {
 
 // DELETE /api/v1/teams/:workspaceId/members/:memberId
 const removeMember = asyncHandler(async (req, res) => {
-  const member = await TeamMember.findOneAndUpdate(
-    { _id: req.params.memberId, workspace: req.params.workspaceId },
-    { status: "removed" },
-    { new: true }
-  );
+  const member = await TeamMember.findOne({
+    _id: req.params.memberId,
+    workspace: req.params.workspaceId,
+  });
 
   if (!member) throw ApiError.notFound("Team member not found.");
+  if (member.role === "owner") throw ApiError.badRequest("Cannot remove the workspace owner.");
+
+  member.status = "removed";
+  await member.save();
 
   return new ApiResponse(200, "Team member removed successfully.").send(res);
 });
