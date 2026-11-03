@@ -101,6 +101,10 @@ const submitManualPayment = asyncHandler(async (req, res) => {
   const subscription = await Subscription.findOne({ workspace: req.workspaceId });
   if (!subscription) throw ApiError.notFound("Subscription not found for this workspace.");
 
+  subscription.status = "pending_payment";
+  subscription.plan = plan;
+  await subscription.save();
+
   const payment = await Payment.create({
     workspace: req.workspaceId,
     subscription: subscription._id,

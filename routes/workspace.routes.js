@@ -10,6 +10,12 @@ router.use(authenticate);
 
 router.post("/", validate(workspaceValidators.create), workspaceController.createWorkspace);
 router.get("/", workspaceController.getMyWorkspaces);
+
+// Invitations (must be defined before /:id)
+router.get("/invitations", workspaceController.getMyInvitations);
+router.post("/invitations/:id/accept", workspaceController.acceptInvitation);
+router.post("/invitations/:id/reject", workspaceController.rejectInvitation);
+
 router.patch("/:id", workspaceController.updateWorkspace);
 router.delete("/:id", workspaceController.deleteWorkspace);
 router.post("/:id/switch", workspaceController.switchWorkspace);
