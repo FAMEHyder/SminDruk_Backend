@@ -89,56 +89,27 @@ const createBulkPost = asyncHandler(async (req, res) => {
   const to = Number(toPage);
   if (Number.isNaN(from) || Number.isNaN(to) || from < 1 || to < from) throw ApiError.badRequest("Invalid page number range.");
 
-  if (isScheduled) {
-    const bulkPost = await BulkPost.create({
-      workspace: workspaceId,
-      createdBy: req.user._id,
-      secretKey: secretKey.trim(),
-      content,
-      fromPage: from,
-      toPage: to,
-      category: category?.trim() || "",
-      postType: postType || "text",
-      mediaId: mediaId || undefined,
-      scheduledAt: parsedScheduledAt,
-      status: "scheduled",
-    });
-
-    return new ApiResponse(201, "Bulk post scheduled successfully.", bulkPost).send(res);
-  }
-
-  const result = await executeBulkPublish({
-    workspaceId,
+  // All bulk posts require admin approval before publishing or scheduling
+  const bulkPost = await BulkPost.create({
+    workspace: workspaceId,
+    createdBy: req.user._id,
     secretKey: secretKey.trim(),
     content,
     fromPage: from,
     toPage: to,
     category: category?.trim() || "",
     postType: postType || "text",
-    mediaId,
+    mediaId: mediaId || undefined,
+    scheduledAt: parsedScheduledAt || new Date(),
+    isImmediate: !isScheduled,
+    status: "pending_approval",
   });
 
-  try {
-    await BulkPost.create({
-      workspace: workspaceId,
-      createdBy: req.user._id,
-      secretKey: secretKey.trim(),
-      content,
-      fromPage: from,
-      toPage: to,
-      category: category?.trim() || "",
-      postType: postType || "text",
-      mediaId: mediaId || undefined,
-      scheduledAt: new Date(),
-      status: "published",
-      publishedCount: result.publishedCount,
-      failedCount: result.failedCount,
-    });
-  } catch (bulkErr) {
-    logger.warn(`BulkPost record creation skipped: ${bulkErr.message}`);
-  }
-
-  return new ApiResponse(200, "Bulk post published successfully.", result).send(res);
+  return new ApiResponse(
+    201,
+    "Bulk post submitted for admin approval. Once approved, it will be published or scheduled.",
+    bulkPost
+  ).send(res);
 });
 
 // POST /api/v1/connected-pages/posts/fetch

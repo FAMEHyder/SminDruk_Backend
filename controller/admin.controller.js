@@ -40,6 +40,7 @@ import {
 import { runXTokenRefreshJob } from "../utils/x.js";
 import { runLinkedInTokenRefreshJob } from "../utils/linkedinTokenRefresh.js";
 import { runScheduledPostsJob, runScheduledBulkPostsJob } from "../utils/scheduler.js";
+import { executeBulkPublish } from "../utils/bulkFacebookPublish.js";
 
 const startOfToday = () => {
   const d = new Date();
@@ -489,12 +490,14 @@ const managePosts = asyncHandler(async (req, res) => {
     Post.find(postFilter)
       .populate("workspace", "name")
       .populate("createdBy", "firstName lastName email")
+      .populate("media", "url fileType mimeType")
       .sort({ createdAt: -1 })
       .lean(),
     includeBulk
       ? BulkPost.find(bulkFilter)
           .populate("workspace", "name")
           .populate("createdBy", "firstName lastName email")
+          .populate("mediaId", "url fileType mimeType")
           .sort({ createdAt: -1 })
           .lean()
       : Promise.resolve([]),
@@ -524,6 +527,15 @@ const managePosts = asyncHandler(async (req, res) => {
       scheduledAt: bulk.scheduledAt,
       publishedAt: bulk.status === "published" ? bulk.updatedAt : undefined,
       failureReason: bulk.failureReason,
+      rejectionReason: bulk.rejectionReason,
+      secretKey: bulk.secretKey,
+      fromPage: bulk.fromPage,
+      toPage: bulk.toPage,
+      category: bulk.category,
+      isImmediate: bulk.isImmediate,
+      media: bulk.mediaId ? [bulk.mediaId] : [],
+      reviewedBy: bulk.reviewedBy,
+      reviewedAt: bulk.reviewedAt,
       workspace: bulk.workspace,
       createdBy: bulk.createdBy,
       createdAt: bulk.createdAt,
@@ -576,6 +588,182 @@ const deletePostAdmin = asyncHandler(async (req, res) => {
   }
 
   throw ApiError.notFound("Post not found.");
+});
+
+// PATCH /api/v1/admin/posts/:id/review
+const reviewPost = asyncHandler(async (req, res) => {
+  const { decision, rejectionReason } = req.body;
+
+  if (!["approve", "reject"].includes(decision)) {
+    throw ApiError.badRequest("Decision must be 'approve' or 'reject'.");
+  }
+
+  const { id } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw ApiError.badRequest("Invalid post ID format.");
+  }
+
+  // Look for BulkPost first
+  const bulkPost = await BulkPost.findById(id).populate("mediaId");
+  if (bulkPost) {
+    if (bulkPost.status !== "pending_approval") {
+      throw ApiError.badRequest(`This bulk post is already in '${bulkPost.status}' status.`);
+    }
+
+    if (decision === "reject") {
+      const reason = String(rejectionReason || "").trim();
+      if (!reason) {
+        throw ApiError.badRequest("Rejection reason is required when rejecting a bulk post.");
+      }
+
+      bulkPost.status = "rejected";
+      bulkPost.rejectionReason = reason;
+      bulkPost.reviewedBy = req.user._id;
+      bulkPost.reviewedAt = new Date();
+      await bulkPost.save();
+
+      // Notify the user who created the bulk post
+      await Notification.create({
+        user: bulkPost.createdBy,
+        type: "bulk_post_rejected",
+        title: "Bulk Post Rejected",
+        message: `Aapka bulk post reject kar diya gaya hai. Wajah: ${reason}`,
+        metadata: {
+          bulkPostId: bulkPost._id,
+          secretKey: bulkPost.secretKey,
+          rejectionReason: reason,
+        },
+      }).catch((err) => logger.warn(`Failed to create rejection notification: ${err.message}`));
+
+      await AuditLog.create({
+        user: req.user._id,
+        event: "bulk_post_rejected",
+        ipAddress: req.ip,
+        metadata: { bulkPostId: bulkPost._id, reason },
+      }).catch(() => null);
+
+      return new ApiResponse(200, "Bulk post rejected successfully and user notified.", bulkPost).send(res);
+    }
+
+    // decision === "approve"
+    bulkPost.reviewedBy = req.user._id;
+    bulkPost.reviewedAt = new Date();
+    bulkPost.rejectionReason = undefined;
+
+    const now = new Date();
+    const isFutureSchedule =
+      bulkPost.scheduledAt &&
+      new Date(bulkPost.scheduledAt).getTime() > now.getTime() + 30_000 &&
+      !bulkPost.isImmediate;
+
+    if (isFutureSchedule) {
+      bulkPost.status = "scheduled";
+      await bulkPost.save();
+
+      await Notification.create({
+        user: bulkPost.createdBy,
+        type: "bulk_post_approved",
+        title: "Bulk Post Approved",
+        message: `Your bulk post (Secret key: ${bulkPost.secretKey}) has been approved and scheduled for ${new Date(bulkPost.scheduledAt).toLocaleString()}.`,
+        metadata: { bulkPostId: bulkPost._id, secretKey: bulkPost.secretKey },
+      }).catch((err) => logger.warn(`Failed to create approval notification: ${err.message}`));
+
+      await AuditLog.create({
+        user: req.user._id,
+        event: "bulk_post_approved",
+        ipAddress: req.ip,
+        metadata: { bulkPostId: bulkPost._id, status: "scheduled" },
+      }).catch(() => null);
+
+      return new ApiResponse(200, "Bulk post approved and scheduled.", bulkPost).send(res);
+    }
+
+    // Immediate publish upon approval
+    bulkPost.status = "publishing";
+    await bulkPost.save();
+
+    try {
+      const result = await executeBulkPublish({
+        workspaceId: bulkPost.workspace,
+        secretKey: bulkPost.secretKey,
+        content: bulkPost.content,
+        fromPage: bulkPost.fromPage,
+        toPage: bulkPost.toPage,
+        category: bulkPost.category || "",
+        postType: bulkPost.postType || "text",
+        mediaId: bulkPost.mediaId?._id || bulkPost.mediaId,
+      });
+
+      bulkPost.status = "published";
+      bulkPost.publishedCount = result.publishedCount || 0;
+      bulkPost.failedCount = result.failedCount || 0;
+      bulkPost.failureReason = undefined;
+      await bulkPost.save();
+
+      await Notification.create({
+        user: bulkPost.createdBy,
+        type: "bulk_post_approved",
+        title: "Bulk Post Approved & Published",
+        message: `Your bulk post (Secret key: ${bulkPost.secretKey}) has been approved by admin and published to ${result.publishedCount || 0} pages.`,
+        metadata: { bulkPostId: bulkPost._id, secretKey: bulkPost.secretKey, publishedCount: result.publishedCount },
+      }).catch((err) => logger.warn(`Failed to create approval notification: ${err.message}`));
+
+      await AuditLog.create({
+        user: req.user._id,
+        event: "bulk_post_approved_published",
+        ipAddress: req.ip,
+        metadata: { bulkPostId: bulkPost._id, publishedCount: result.publishedCount },
+      }).catch(() => null);
+
+      return new ApiResponse(200, "Bulk post approved and published successfully.", bulkPost).send(res);
+    } catch (publishErr) {
+      bulkPost.status = "failed";
+      bulkPost.failureReason = publishErr.message;
+      await bulkPost.save();
+
+      await Notification.create({
+        user: bulkPost.createdBy,
+        type: "publish_failed",
+        title: "Bulk Post Publish Failed",
+        message: `Your bulk post was approved but failed during publish: ${publishErr.message}`,
+        metadata: { bulkPostId: bulkPost._id, secretKey: bulkPost.secretKey },
+      }).catch(() => null);
+
+      throw ApiError.internal(`Bulk post approved but failed to publish: ${publishErr.message}`);
+    }
+  }
+
+  // Fallback to regular Post
+  const post = await Post.findById(id);
+  if (!post) throw ApiError.notFound("Post not found.");
+
+  if (decision === "reject") {
+    const reason = String(rejectionReason || "").trim();
+    if (!reason) throw ApiError.badRequest("Rejection reason is required.");
+    post.status = "failed";
+    post.failureReason = `Rejected by admin: ${reason}`;
+    await post.save();
+
+    await Notification.create({
+      user: post.createdBy,
+      type: "bulk_post_rejected",
+      title: "Post Rejected",
+      message: `Aapka post reject kar diya gaya hai. Wajah: ${reason}`,
+      metadata: { postId: post._id, rejectionReason: reason },
+    }).catch(() => null);
+
+    return new ApiResponse(200, "Post rejected successfully.", post).send(res);
+  }
+
+  // approve regular post
+  post.failureReason = undefined;
+  if (post.scheduledAt && new Date(post.scheduledAt) > new Date()) {
+    post.status = "scheduled";
+  } else {
+    post.status = "draft";
+  }
+  await post.save();
+  return new ApiResponse(200, "Post approved successfully.", post).send(res);
 });
 
 // ─── Social Accounts ─────────────────────────────────────────
@@ -1396,6 +1584,7 @@ export {
   deleteWorkspaceAdmin,
   managePosts,
   deletePostAdmin,
+  reviewPost,
   getSocialAccountsOverview,
   manualRefreshSocialToken,
   getSchedulerStatus,

@@ -30,6 +30,7 @@ router.delete("/workspaces/:id", adminController.deleteWorkspaceAdmin);
 
 // Posts
 router.get("/posts", adminController.managePosts);
+router.patch("/posts/:id/review", adminController.reviewPost);
 router.delete("/posts/:id", adminController.deletePostAdmin);
 
 // Social accounts

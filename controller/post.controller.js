@@ -233,7 +233,7 @@ const listCalendarPosts = asyncHandler(async (req, res) => {
   const { workspaceId, from, to } = req.query;
   if (!workspaceId) throw ApiError.badRequest("workspaceId is required.");
 
-  const statuses = ["scheduled", "published", "failed", "publishing"];
+  const statuses = ["pending_approval", "scheduled", "published", "failed", "publishing", "rejected"];
 
   // Default window: previous month → next two months (keeps month navigation usable).
   const rangeStart = from
@@ -254,12 +254,22 @@ const listCalendarPosts = asyncHandler(async (req, res) => {
   const [posts, bulks] = await Promise.all([
     Post.find({ workspace: workspaceId, status: { $in: statuses }, ...dateFilter })
       .populate("media", "url fileType mimeType")
-      .select("content type status scheduledAt publishedAt platforms workspace createdBy createdAt updatedAt")
+      .select("content type status scheduledAt publishedAt platforms workspace createdBy createdAt updatedAt failureReason")
       .sort({ scheduledAt: 1, publishedAt: 1 })
       .limit(500)
       .lean(),
-    BulkPost.find({ workspace: workspaceId, status: { $in: statuses }, scheduledAt: { $gte: rangeStart, $lte: rangeEnd } })
-      .select("content postType status scheduledAt workspace createdBy failureReason createdAt updatedAt")
+    BulkPost.find({
+      workspace: workspaceId,
+      status: { $in: statuses },
+      $or: [
+        { scheduledAt: { $gte: rangeStart, $lte: rangeEnd } },
+        { createdAt: { $gte: rangeStart, $lte: rangeEnd } },
+      ],
+    })
+      .populate("mediaId", "url fileType mimeType")
+      .select(
+        "content postType status scheduledAt workspace createdBy failureReason rejectionReason secretKey fromPage toPage category mediaId isImmediate createdAt updatedAt"
+      )
       .sort({ scheduledAt: 1 })
       .limit(500)
       .lean(),
@@ -277,13 +287,19 @@ const listCalendarPosts = asyncHandler(async (req, res) => {
       createdBy: bulk.createdBy,
       type: bulk.postType || "text",
       content: bulk.content,
-      media: [],
+      media: bulk.mediaId ? [bulk.mediaId] : [],
       platforms: ["facebook"],
       status: bulk.status,
       scheduledAt: bulk.scheduledAt,
       publishedAt: bulk.status === "published" ? bulk.updatedAt : undefined,
       retryCount: 0,
       failureReason: bulk.failureReason,
+      rejectionReason: bulk.rejectionReason,
+      secretKey: bulk.secretKey,
+      fromPage: bulk.fromPage,
+      toPage: bulk.toPage,
+      category: bulk.category,
+      isImmediate: bulk.isImmediate,
       createdAt: bulk.createdAt,
       updatedAt: bulk.updatedAt,
       kind: "bulk",
@@ -316,33 +332,67 @@ const getPost = asyncHandler(async (req, res) => {
 
 
 // PATCH /api/v1/posts/:id
-
 const updatePost = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { content, scheduledAt, platforms, socialAccountIds, fromPage, toPage, category } = req.body;
 
-  const post = await Post.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+  let post = await Post.findById(id);
+  if (post) {
+    if (content !== undefined) post.content = content;
+    if (platforms !== undefined) post.platforms = platforms;
+    if (socialAccountIds !== undefined) post.socialAccounts = socialAccountIds;
+    if (scheduledAt !== undefined) {
+      const parsed = new Date(scheduledAt);
+      if (Number.isNaN(parsed.getTime())) throw ApiError.badRequest("Invalid scheduledAt date.");
+      post.scheduledAt = parsed;
+      if (post.status === "failed") {
+        post.status = "scheduled";
+        post.failureReason = undefined;
+        post.retryCount = 0;
+      }
+    }
+    await post.save();
+    return new ApiResponse(200, "Scheduled post updated successfully.", post).send(res);
+  }
 
-  if (!post) throw ApiError.notFound("Post not found.");
+  let bulkPost = await BulkPost.findById(id);
+  if (bulkPost) {
+    if (content !== undefined) bulkPost.content = content;
+    if (fromPage !== undefined) bulkPost.fromPage = Number(fromPage);
+    if (toPage !== undefined) bulkPost.toPage = Number(toPage);
+    if (category !== undefined) bulkPost.category = category;
+    if (scheduledAt !== undefined) {
+      const parsed = new Date(scheduledAt);
+      if (Number.isNaN(parsed.getTime())) throw ApiError.badRequest("Invalid scheduledAt date.");
+      bulkPost.scheduledAt = parsed;
+      bulkPost.isImmediate = false;
+      if (bulkPost.status === "failed") {
+        bulkPost.status = "scheduled";
+        bulkPost.failureReason = undefined;
+      }
+    }
+    await bulkPost.save();
+    return new ApiResponse(200, "Scheduled bulk post updated successfully.", bulkPost).send(res);
+  }
 
-
-
-  return new ApiResponse(200, "Post updated successfully.", post).send(res);
-
+  throw ApiError.notFound("Post not found.");
 });
 
-
-
 // DELETE /api/v1/posts/:id
-
 const deletePost = asyncHandler(async (req, res) => {
+  const { id } = req.params;
 
-  const post = await Post.findByIdAndDelete(req.params.id);
+  const post = await Post.findByIdAndDelete(id);
+  if (post) {
+    return new ApiResponse(200, "Scheduled post deleted successfully.").send(res);
+  }
 
-  if (!post) throw ApiError.notFound("Post not found.");
+  const bulkPost = await BulkPost.findByIdAndDelete(id);
+  if (bulkPost) {
+    return new ApiResponse(200, "Scheduled bulk post deleted successfully.").send(res);
+  }
 
-
-
-  return new ApiResponse(200, "Post deleted successfully.").send(res);
-
+  throw ApiError.notFound("Post not found.");
 });
 
 

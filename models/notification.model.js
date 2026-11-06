@@ -12,6 +12,8 @@ const notificationSchema = new mongoose.Schema(
         "team_invitation",
         "password_changed",
         "admin_broadcast",
+        "bulk_post_approved",
+        "bulk_post_rejected",
       ],
       required: true,
     },
