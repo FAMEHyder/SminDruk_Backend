@@ -8,6 +8,8 @@ const bulkPostSchema = new mongoose.Schema(
     content: { type: String, required: true, maxlength: 2200 },
     fromPage: { type: Number, required: true, min: 1 },
     toPage: { type: Number, required: true, min: 1 },
+    pageNumbers: [{ type: Number }],
+    pageIds: [{ type: String }],
     category: { type: String, default: "", trim: true },
     postType: {
       type: String,

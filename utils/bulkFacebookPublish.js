@@ -82,6 +82,7 @@ const executeBulkPublish = async ({
   content,
   fromPage,
   toPage,
+  pageNumbers,
   category,
   postType = "text",
   mediaId,
@@ -92,7 +93,8 @@ const executeBulkPublish = async ({
 
   if (!secretKey?.trim()) throw new Error("Secret key is required.");
   if (!content?.trim()) throw new Error("Post content is required.");
-  if (Number.isNaN(from) || Number.isNaN(to) || from < 1 || to < from) {
+  const hasPageNumbers = Array.isArray(pageNumbers) && pageNumbers.length > 0;
+  if (!hasPageNumbers && (Number.isNaN(from) || Number.isNaN(to) || from < 1 || to < from)) {
     throw new Error("Invalid page number range.");
   }
 
@@ -105,11 +107,16 @@ const executeBulkPublish = async ({
 
   const query = {
     status: "connected",
-    pageNumber: { $gte: from, $lte: to },
   };
 
-  if (category?.trim()) {
-    query.category = category.trim();
+  if (hasPageNumbers) {
+    query.pageNumber = { $in: pageNumbers.map(Number) };
+  } else {
+    query.pageNumber = { $gte: from, $lte: to };
+  }
+
+  if (category?.trim() && category !== "__all__") {
+    query.category = { $regex: new RegExp(`^${category.trim()}$`, "i") };
   }
 
   const pages = await ConnectedPage.find(query).sort({ pageNumber: 1 }).select("+pageAccessToken +userAccessToken");

@@ -7,6 +7,7 @@ const router = express.Router();
 router.use(authenticate);
 
 router.get("/trending-meta", connectedPageController.getTrendingMeta);
+router.get("/dataset-pages", connectedPageController.getDatasetPages);
 router.get("/", connectedPageController.listConnectedPages);
 router.post("/bulk-post", connectedPageController.createBulkPost);
 router.post("/posts/fetch", connectedPageController.fetchPostsBySecretKey);

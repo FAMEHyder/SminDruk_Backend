@@ -29,6 +29,52 @@ const getTrendingMeta = asyncHandler(async (_req, res) => {
   }).send(res);
 });
 
+// GET /api/v1/connected-pages/dataset-pages (paginated dataset pages across all or specific categories)
+const getDatasetPages = asyncHandler(async (req, res) => {
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const limit = Math.max(1, Math.min(100, parseInt(req.query.limit, 10) || 10));
+  const category = req.query.category?.trim();
+  const search = req.query.search?.trim();
+
+  const query = { status: "connected" };
+  if (category && category !== "__all__") {
+    const escapedCat = category.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    query.category = { $regex: new RegExp(`^${escapedCat}$`, "i") };
+  }
+  if (search) {
+    const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    query.$or = [
+      { pageName: { $regex: escaped, $options: "i" } },
+      { category: { $regex: escaped, $options: "i" } },
+    ];
+  }
+
+  const [pages, total, distinctCategories] = await Promise.all([
+    ConnectedPage.find(query)
+      .select("pageId pageName pageNumber category profilePicture status createdAt")
+      .sort({ pageNumber: 1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean(),
+    ConnectedPage.countDocuments(query),
+    ConnectedPage.distinct("category", {
+      status: "connected",
+      category: { $exists: true, $nin: ["", null] },
+    }),
+  ]);
+
+  return new ApiResponse(200, "Dataset pages fetched successfully.", {
+    pages,
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit) || 1,
+    },
+    categories: distinctCategories.filter(Boolean).sort((a, b) => a.localeCompare(b)),
+  }).send(res);
+});
+
 // GET /api/v1/connected-pages?workspaceId=  (user's own trending pages in this workspace)
 const listConnectedPages = asyncHandler(async (req, res) => {
   const pages = await ConnectedPage.find({
@@ -48,8 +94,20 @@ const listConnectedPages = asyncHandler(async (req, res) => {
 
 // POST /api/v1/connected-pages/bulk-post
 const createBulkPost = asyncHandler(async (req, res) => {
-  const { workspaceId, secretKey, content, fromPage, toPage, category, postType, scheduledAt, mediaId, targetType = "dataset", socialAccountIds } =
-    req.body;
+  const {
+    workspaceId,
+    secretKey,
+    content,
+    fromPage,
+    toPage,
+    pageNumbers,
+    category,
+    postType,
+    scheduledAt,
+    mediaId,
+    targetType = "dataset",
+    socialAccountIds,
+  } = req.body;
 
   if (!workspaceId || !content?.trim()) {
     throw ApiError.badRequest("workspaceId and content are required.");
@@ -85,9 +143,24 @@ const createBulkPost = asyncHandler(async (req, res) => {
   }
 
   if (!secretKey?.trim()) throw ApiError.badRequest("secretKey is required for trending dataset posts.");
-  const from = Number(fromPage);
-  const to = Number(toPage);
-  if (Number.isNaN(from) || Number.isNaN(to) || from < 1 || to < from) throw ApiError.badRequest("Invalid page number range.");
+
+  let resolvedPageNumbers = [];
+  if (Array.isArray(pageNumbers) && pageNumbers.length > 0) {
+    resolvedPageNumbers = pageNumbers.map(Number).filter((n) => !Number.isNaN(n) && n > 0);
+  }
+
+  let from = Number(fromPage);
+  let to = Number(toPage);
+
+  if (resolvedPageNumbers.length > 0) {
+    if (Number.isNaN(from) || from < 1) from = Math.min(...resolvedPageNumbers);
+    if (Number.isNaN(to) || to < from) to = Math.max(...resolvedPageNumbers);
+  } else {
+    if (Number.isNaN(from) || Number.isNaN(to) || from < 1 || to < from) {
+      throw ApiError.badRequest("Invalid page number range or no pages selected.");
+    }
+    resolvedPageNumbers = Array.from({ length: to - from + 1 }, (_, idx) => from + idx);
+  }
 
   // All bulk posts require admin approval before publishing or scheduling
   const bulkPost = await BulkPost.create({
@@ -97,6 +170,7 @@ const createBulkPost = asyncHandler(async (req, res) => {
     content,
     fromPage: from,
     toPage: to,
+    pageNumbers: resolvedPageNumbers,
     category: category?.trim() || "",
     postType: postType || "text",
     mediaId: mediaId || undefined,
@@ -171,13 +245,17 @@ const fetchPostsBySecretKey = asyncHandler(async (req, res) => {
       continue;
     }
 
+    const hasPageNumbers = Array.isArray(bulk.pageNumbers) && bulk.pageNumbers.length > 0;
     const from = Number(bulk.fromPage);
     const to = Number(bulk.toPage);
 
-    if (!Number.isNaN(from) && !Number.isNaN(to) && from >= 1 && to >= from) {
-      const pageQuery = {
-        pageNumber: { $gte: from, $lte: to },
-      };
+    if (hasPageNumbers || (!Number.isNaN(from) && !Number.isNaN(to) && from >= 1 && to >= from)) {
+      const pageQuery = {};
+      if (hasPageNumbers) {
+        pageQuery.pageNumber = { $in: bulk.pageNumbers.map(Number) };
+      } else {
+        pageQuery.pageNumber = { $gte: from, $lte: to };
+      }
       if (bulk.category && bulk.category !== "__all__") {
         pageQuery.category = { $regex: new RegExp(`^${bulk.category.trim()}$`, "i") };
       }
@@ -197,13 +275,17 @@ const fetchPostsBySecretKey = asyncHandler(async (req, res) => {
         displayStatus = "pending";
       }
 
-      // Generate target page items strictly within this bulk post's page range
+      const expectedNumbers = hasPageNumbers
+        ? bulk.pageNumbers.map(Number)
+        : Array.from({ length: to - from + 1 }, (_, idx) => from + idx);
+
+      // Generate target page items strictly within this bulk post's pages
       const pagesToRender = targetPages.length > 0
         ? targetPages
-        : Array.from({ length: to - from + 1 }, (_, idx) => ({
-            pageId: `page_${from + idx}`,
-            pageNumber: from + idx,
-            pageName: `Page #${from + idx}`,
+        : expectedNumbers.map((num) => ({
+            pageId: `page_${num}`,
+            pageNumber: num,
+            pageName: `Page #${num}`,
             profilePicture: "",
           }));
 
@@ -273,6 +355,7 @@ const disconnectConnectedPage = asyncHandler(async (req, res) => {
 
 export {
   getTrendingMeta,
+  getDatasetPages,
   listConnectedPages,
   createBulkPost,
   fetchPostsBySecretKey,
