@@ -124,7 +124,7 @@ const fetchPostsBySecretKey = asyncHandler(async (req, res) => {
   const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const keyRegex = new RegExp(`^${escaped}$`, "i");
 
-  // Query posts matching this secret key (case-insensitive)
+  // Query published posts matching this secret key (case-insensitive)
   let posts = await PagePost.find({
     secretKey: keyRegex,
     success: true,
@@ -169,8 +169,97 @@ const fetchPostsBySecretKey = asyncHandler(async (req, res) => {
       postLink,
       postContent: post.postContent,
       platformPostId: post.platformPostId,
+      status: "published",
       createdAt: post.createdAt,
     };
+  });
+
+  // Query bulk posts matching this secret key (e.g. pending approval, scheduled, or unapproved)
+  let bulkPosts = await BulkPost.find({
+    secretKey: keyRegex,
+  }).sort({ createdAt: -1 });
+
+  if (!bulkPosts.length && trimmed.length >= 4) {
+    const prefix = escaped.slice(0, Math.min(escaped.length, 5));
+    bulkPosts = await BulkPost.find({
+      secretKey: new RegExp(`^${prefix}`, "i"),
+    }).sort({ createdAt: -1 });
+  }
+
+  for (const bulk of bulkPosts) {
+    // If the bulk post is already completely published and we have published page posts, skip
+    if (bulk.status === "published" && finalPosts.length > 0) {
+      continue;
+    }
+
+    const from = Number(bulk.fromPage);
+    const to = Number(bulk.toPage);
+
+    if (!Number.isNaN(from) && !Number.isNaN(to) && from >= 1 && to >= from) {
+      const pageQuery = {
+        pageNumber: { $gte: from, $lte: to },
+      };
+      if (bulk.category && bulk.category !== "__all__") {
+        pageQuery.category = { $regex: new RegExp(`^${bulk.category.trim()}$`, "i") };
+      }
+
+      const targetPages = await ConnectedPage.find(pageQuery)
+        .select("pageId pageName profilePicture pageNumber")
+        .sort({ pageNumber: 1 });
+
+      const targetPageMap = new Map(targetPages.map((p) => [p.pageNumber, p]));
+
+      let displayStatus = "pending";
+      if (bulk.status === "rejected") {
+        displayStatus = "rejected";
+      } else if (bulk.status === "failed") {
+        displayStatus = "failed";
+      } else {
+        displayStatus = "pending";
+      }
+
+      // Generate target page items (using real connected page data if available, or numbered fallback)
+      const pagesToRender = targetPages.length > 0
+        ? targetPages
+        : Array.from({ length: to - from + 1 }, (_, idx) => ({
+            pageId: `page_${from + idx}`,
+            pageNumber: from + idx,
+            pageName: `Page #${from + idx}`,
+            profilePicture: "",
+          }));
+
+      for (const p of pagesToRender) {
+        // Skip if this page already has a published post returned in finalPosts
+        const alreadyExists = finalPosts.some(
+          (existing) => existing.pageNumber != null && existing.pageNumber === p.pageNumber
+        );
+        if (alreadyExists) continue;
+
+        const matchedPage = targetPageMap.get(p.pageNumber) || p;
+        finalPosts.push({
+          _id: `pending_${bulk._id}_${p.pageNumber}`,
+          secretKey: bulk.secretKey,
+          pageId: matchedPage.pageId || `page_${p.pageNumber}`,
+          pageNumber: p.pageNumber,
+          pageName: matchedPage.pageName || `Page #${p.pageNumber}`,
+          pageDp: matchedPage.profilePicture || "",
+          postLink: "",
+          postContent: bulk.content,
+          platformPostId: "",
+          status: displayStatus,
+          rejectionReason: bulk.rejectionReason,
+          createdAt: bulk.createdAt,
+        });
+      }
+    }
+  }
+
+  // Sort: by pageNumber ascending if available, otherwise by createdAt descending
+  finalPosts.sort((a, b) => {
+    if (a.pageNumber != null && b.pageNumber != null) {
+      return a.pageNumber - b.pageNumber;
+    }
+    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
   });
 
   return new ApiResponse(200, "Posts fetched successfully.", finalPosts).send(res);
