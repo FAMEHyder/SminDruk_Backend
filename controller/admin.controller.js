@@ -628,7 +628,7 @@ const reviewPost = asyncHandler(async (req, res) => {
         user: bulkPost.createdBy,
         type: "bulk_post_rejected",
         title: "Bulk Post Rejected",
-        message: `Aapka bulk post reject kar diya gaya hai. Wajah: ${reason}`,
+        message: `Your bulk post was rejected by admin. Reason: ${reason}`,
         metadata: {
           bulkPostId: bulkPost._id,
           secretKey: bulkPost.secretKey,
@@ -750,7 +750,7 @@ const reviewPost = asyncHandler(async (req, res) => {
       user: post.createdBy,
       type: "bulk_post_rejected",
       title: "Post Rejected",
-      message: `Aapka post reject kar diya gaya hai. Wajah: ${reason}`,
+      message: `Your post was rejected by admin. Reason: ${reason}`,
       metadata: { postId: post._id, rejectionReason: reason },
     }).catch(() => null);
 
