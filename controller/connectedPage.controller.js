@@ -122,28 +122,14 @@ const fetchPostsBySecretKey = asyncHandler(async (req, res) => {
 
   const trimmed = secretKey.trim();
   const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Strict exact case-insensitive match (NO prefix search fallback to avoid matching unrelated keys)
   const keyRegex = new RegExp(`^${escaped}$`, "i");
 
-  // Query published posts matching this secret key (case-insensitive)
+  // Query published posts matching this EXACT secret key
   let posts = await PagePost.find({
     secretKey: keyRegex,
     success: true,
   }).sort({ createdAt: -1 });
-
-  // Fallback: If no exact case-insensitive match found, try prefix search (min 4 chars) to catch minor typos
-  if (!posts.length && trimmed.length >= 4) {
-    const prefix = escaped.slice(0, Math.min(escaped.length, 5));
-    const candidate = await PagePost.findOne({
-      secretKey: new RegExp(`^${prefix}`, "i"),
-      success: true,
-    });
-    if (candidate?.secretKey) {
-      posts = await PagePost.find({
-        secretKey: candidate.secretKey,
-        success: true,
-      }).sort({ createdAt: -1 });
-    }
-  }
 
   const pageIds = [...new Set(posts.map((post) => post.pageId))];
   const pages = await ConnectedPage.find({ pageId: { $in: pageIds } }).select(
@@ -174,17 +160,10 @@ const fetchPostsBySecretKey = asyncHandler(async (req, res) => {
     };
   });
 
-  // Query bulk posts matching this secret key (e.g. pending approval, scheduled, or unapproved)
+  // Query bulk posts matching this EXACT secret key
   let bulkPosts = await BulkPost.find({
     secretKey: keyRegex,
   }).sort({ createdAt: -1 });
-
-  if (!bulkPosts.length && trimmed.length >= 4) {
-    const prefix = escaped.slice(0, Math.min(escaped.length, 5));
-    bulkPosts = await BulkPost.find({
-      secretKey: new RegExp(`^${prefix}`, "i"),
-    }).sort({ createdAt: -1 });
-  }
 
   for (const bulk of bulkPosts) {
     // If the bulk post is already completely published and we have published page posts, skip
@@ -218,7 +197,7 @@ const fetchPostsBySecretKey = asyncHandler(async (req, res) => {
         displayStatus = "pending";
       }
 
-      // Generate target page items (using real connected page data if available, or numbered fallback)
+      // Generate target page items strictly within this bulk post's page range
       const pagesToRender = targetPages.length > 0
         ? targetPages
         : Array.from({ length: to - from + 1 }, (_, idx) => ({
