@@ -175,14 +175,26 @@ const createManageLives = asyncHandler(async (req, res) => {
 });
 
 const createDatasetLives = asyncHandler(async (req, res) => {
-  const { workspaceId, secretKey, fromPage, toPage, category, title, description, scheduledAt } = req.body;
+  const { workspaceId, secretKey, fromPage, toPage, pageNumbers, category, title, description, scheduledAt } = req.body;
   if (!workspaceId) throw ApiError.badRequest("workspaceId is required.");
   if (!secretKey?.trim()) throw ApiError.badRequest("secretKey is required for dataset live videos.");
 
-  const from = Number(fromPage);
-  const to = Number(toPage);
-  if (Number.isNaN(from) || Number.isNaN(to) || from < 1 || to < from) {
-    throw ApiError.badRequest("Enter a valid page number range.");
+  let resolvedPageNumbers = [];
+  if (Array.isArray(pageNumbers) && pageNumbers.length > 0) {
+    resolvedPageNumbers = pageNumbers.map(Number).filter((n) => !Number.isNaN(n) && n > 0);
+  }
+
+  let from = Number(fromPage);
+  let to = Number(toPage);
+
+  if (resolvedPageNumbers.length > 0) {
+    if (Number.isNaN(from) || from < 1) from = Math.min(...resolvedPageNumbers);
+    if (Number.isNaN(to) || to < from) to = Math.max(...resolvedPageNumbers);
+  } else {
+    if (Number.isNaN(from) || Number.isNaN(to) || from < 1 || to < from) {
+      throw ApiError.badRequest("Enter a valid page number range or select pages.");
+    }
+    resolvedPageNumbers = Array.from({ length: to - from + 1 }, (_, idx) => from + idx);
   }
 
   const subscription = await ensureActiveSubscription(workspaceId);
@@ -190,11 +202,18 @@ const createDatasetLives = asyncHandler(async (req, res) => {
   const isScheduled = parsedScheduledAt && parsedScheduledAt.getTime() > Date.now() + 30_000;
   const broadcastStatus = isScheduled ? "SCHEDULED_UNPUBLISHED" : "LIVE_NOW";
 
-  const query = { status: "connected", pageNumber: { $gte: from, $lte: to } };
-  if (category?.trim()) query.category = category.trim();
+  const query = { status: "connected" };
+  if (resolvedPageNumbers.length > 0) {
+    query.pageNumber = { $in: resolvedPageNumbers };
+  } else {
+    query.pageNumber = { $gte: from, $lte: to };
+  }
+  if (category?.trim() && category !== "__all__") {
+    query.category = { $regex: new RegExp(`^${category.trim()}$`, "i") };
+  }
 
   const pages = await ConnectedPage.find(query).sort({ pageNumber: 1 }).select("+pageAccessToken +userAccessToken");
-  if (!pages.length) throw ApiError.badRequest("No trending pages found in that range.");
+  if (!pages.length) throw ApiError.badRequest("No trending pages found matching your selection.");
 
   await assertLiveQuota(subscription, pages.length);
   await ensureFreshDatasetTokensForPages(pages);
