@@ -199,6 +199,61 @@ const generateCta = asyncHandler(async (req, res) => {
   return new ApiResponse(200, "CTA generated successfully.", { cta }).send(res);
 });
 
+// POST /api/v1/ai/variations — AI Variations Generator for multiple pages
+const generateVariations = asyncHandler(async (req, res) => {
+  const text = requirePrompt(req.body.text || req.body.prompt, "text");
+  const count = Math.min(50, Math.max(1, parseInt(req.body.count, 10) || 3));
+  const platform = req.body.platform || "Facebook";
+  const pagesInfo = Array.isArray(req.body.pages) ? req.body.pages : [];
+
+  let pagesContext = "";
+  if (pagesInfo.length > 0) {
+    pagesContext = `The pages being published to are:\n${pagesInfo
+      .map((p, i) => `${i + 1}. Page #${p.pageNumber || i + 1}: "${p.name || p.pageName || "Facebook Page"}"`)
+      .join("\n")}\nTailor each variation to fit its respective page naturally while keeping the core message aligned.`;
+  }
+
+  const systemPrompt = `You are a world-class social media copywriter. You will receive a base post or topic, and you must generate exactly ${count} completely distinct, creative, and engaging variations of it for ${platform}.
+Requirements:
+1. Every variation must convey the identical core message, key value propositions, and intent of the original.
+2. Every variation MUST use a noticeably different opening hook, sentence phrasing, formatting, and tone angle (e.g. question hook, storytelling angle, direct benefit, statistic/fact-driven, conversational tip).
+3. Include relevant emojis naturally.
+4. Keep each variation clean, ready-to-post, and under 2000 characters.
+${pagesContext}
+
+OUTPUT FORMAT: Return ONLY a valid JSON array of strings containing exactly ${count} items. Do NOT wrap in markdown codeblocks. Do NOT add preamble or explanations.
+Example format:
+["First variation text...", "Second variation text...", "Third variation text..."]`;
+
+  const raw = await generateCompletion(systemPrompt, text);
+
+  let variations = [];
+  try {
+    const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+    const parsed = JSON.parse(cleaned);
+    if (Array.isArray(parsed)) {
+      variations = parsed.map((item) => (typeof item === "string" ? item.trim() : String(item))).filter(Boolean);
+    }
+  } catch {
+    variations = raw
+      .split(/\n\s*(?:\[?\d+[\.\)\]]|\-)\s*/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+
+  if (!variations.length) {
+    variations = [text];
+  }
+
+  while (variations.length < count) {
+    variations.push(variations[variations.length - 1] || text);
+  }
+
+  return new ApiResponse(200, "Variations generated successfully.", {
+    variations: variations.slice(0, count),
+  }).send(res);
+});
+
 export {
   generateCaption,
   generateHashtags,
@@ -214,4 +269,5 @@ export {
   translateCaption,
   generateContentIdeas,
   generateCta,
+  generateVariations,
 };

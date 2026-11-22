@@ -120,6 +120,17 @@ const aiValidators = {
     text: z.string().min(1),
     targetLanguage: z.string().min(2),
   }),
+  variations: z
+    .object({
+      text: z.string().min(3).optional(),
+      prompt: z.string().min(3).optional(),
+      count: z.coerce.number().min(1).max(50).optional(),
+      platform: z.string().optional(),
+      pages: z.array(z.any()).optional(),
+    })
+    .refine((data) => Boolean(data.text?.trim() || data.prompt?.trim()), {
+      message: "text or prompt is required",
+    }),
 };
 
 const contactValidators = {

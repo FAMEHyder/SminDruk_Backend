@@ -101,6 +101,7 @@ const createBulkPost = asyncHandler(async (req, res) => {
     fromPage,
     toPage,
     pageNumbers,
+    contentVariations,
     category,
     postType,
     scheduledAt,
@@ -171,6 +172,9 @@ const createBulkPost = asyncHandler(async (req, res) => {
     fromPage: from,
     toPage: to,
     pageNumbers: resolvedPageNumbers,
+    contentVariations: Array.isArray(contentVariations)
+      ? contentVariations.filter((v) => v && typeof v.content === "string" && v.content.trim())
+      : [],
     category: category?.trim() || "",
     postType: postType || "text",
     mediaId: mediaId || undefined,
@@ -279,6 +283,15 @@ const fetchPostsBySecretKey = asyncHandler(async (req, res) => {
         ? bulk.pageNumbers.map(Number)
         : Array.from({ length: to - from + 1 }, (_, idx) => from + idx);
 
+      const variationMap = new Map();
+      if (Array.isArray(bulk.contentVariations)) {
+        for (const v of bulk.contentVariations) {
+          if (v?.pageNumber != null && typeof v.content === "string" && v.content.trim()) {
+            variationMap.set(Number(v.pageNumber), v.content.trim());
+          }
+        }
+      }
+
       // Generate target page items strictly within this bulk post's pages
       const pagesToRender = targetPages.length > 0
         ? targetPages
@@ -297,6 +310,8 @@ const fetchPostsBySecretKey = asyncHandler(async (req, res) => {
         if (alreadyExists) continue;
 
         const matchedPage = targetPageMap.get(p.pageNumber) || p;
+        const pageSpecificContent = variationMap.get(p.pageNumber) || bulk.content;
+
         finalPosts.push({
           _id: `pending_${bulk._id}_${p.pageNumber}`,
           secretKey: bulk.secretKey,
@@ -305,7 +320,7 @@ const fetchPostsBySecretKey = asyncHandler(async (req, res) => {
           pageName: matchedPage.pageName || `Page #${p.pageNumber}`,
           pageDp: matchedPage.profilePicture || "",
           postLink: "",
-          postContent: bulk.content,
+          postContent: pageSpecificContent,
           platformPostId: "",
           status: displayStatus,
           rejectionReason: bulk.rejectionReason,

@@ -22,5 +22,6 @@ router.post("/rewrite", validate(aiValidators.rewrite), aiController.rewriteCapt
 router.post("/translate", validate(aiValidators.translate), aiController.translateCaption);
 router.post("/content-ideas", validate(aiValidators.promptOnly), aiController.generateContentIdeas);
 router.post("/cta", validate(aiValidators.promptOnly), aiController.generateCta);
+router.post("/variations", validate(aiValidators.variations), aiController.generateVariations);
 
 export default router;

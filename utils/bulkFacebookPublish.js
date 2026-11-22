@@ -83,6 +83,7 @@ const executeBulkPublish = async ({
   fromPage,
   toPage,
   pageNumbers,
+  contentVariations,
   category,
   postType = "text",
   mediaId,
@@ -129,14 +130,24 @@ const executeBulkPublish = async ({
   await ensureFreshDatasetTokensForPages(pages);
   const freshPages = await ConnectedPage.find(query).sort({ pageNumber: 1 }).select("+pageAccessToken");
 
+  const variationMap = new Map();
+  if (Array.isArray(contentVariations)) {
+    for (const v of contentVariations) {
+      if (v?.pageNumber != null && typeof v.content === "string" && v.content.trim()) {
+        variationMap.set(Number(v.pageNumber), v.content.trim());
+      }
+    }
+  }
+
   const results = [];
 
   for (let i = 0; i < freshPages.length; i++) {
     const page = freshPages[i];
+    const pageContent = variationMap.get(Number(page.pageNumber)) || content;
     try {
       const { postId, postLink } = await publishConnectedPagePost({
         page,
-        content,
+        content: pageContent,
         postType,
         mediaPath,
         mediaUrl,
@@ -156,7 +167,7 @@ const executeBulkPublish = async ({
           profilePicture: page.profilePicture,
           platformPostId: postId,
           postLink: finalLink,
-          postContent: content,
+          postContent: pageContent,
           success: true,
           error: undefined,
         },
