@@ -17,7 +17,7 @@ const generateCaption = asyncHandler(async (req, res) => {
   const { tone = "friendly", platform = "Facebook" } = req.body;
 
   const caption = await generateCompletion(
-    `You are a social media copywriter. Write a short, engaging ${platform} caption in a ${tone} tone. Return only the caption text. Stay strictly focused on the user's provided topic. Do NOT turn it into a digital marketing, brand campaign, or sales pitch unless the prompt is specifically about that.`,
+    `You are a social media copywriter. Write a short, engaging ${platform} caption in a ${tone} tone based strictly on the user's topic. Return only the caption text.`,
     prompt
   );
 
@@ -110,7 +110,7 @@ const improvePost = asyncHandler(async (req, res) => {
   const { tone = "engaging" } = req.body;
 
   const improved = await generateCompletion(
-    `You improve social media posts. Make the text more ${tone}, clearer, and more engaging while strictly preserving the original topic, meaning, and subject matter. Do NOT add unsolicited digital marketing, sales, or business buzzwords. Return only the improved post.`,
+    `You improve social media posts. Rewrite and polish the user's text to make it more ${tone}, clearer, and better structured while preserving the exact same meaning and context. Return only the improved post.`,
     text
   );
 
@@ -205,22 +205,19 @@ const generateVariations = asyncHandler(async (req, res) => {
   const count = Math.min(50, Math.max(1, parseInt(req.body.count, 10) || 3));
   const platform = req.body.platform || "Facebook";
 
-  const systemPrompt = `You are an expert social media copywriter. You will receive an original post or topic from the user. Your job is to create exactly ${count} distinct, creative variations of this post for ${platform}.
+  const systemPrompt = `You are a professional copywriter. Your task is to rewrite the user's post content into exactly ${count} unique variations for ${platform}.
 
-STRICT MANDATORY RULES (NEVER VIOLATE):
-1. STRICT TOPIC FIDELITY: Every variation must be 100% about the EXACT SAME subject matter as the user's input (e.g. if the original text is about Nature, plants, animals, human character, fitness, food, education, philosophy, etc., EVERY variation MUST strictly stay about that exact same topic).
-2. NO UNRELATED NICHES OR MARKETING JARGON: NEVER inject or twist the topic into "digital marketing", "clicks and content", "brand strategy", "campaigns", "consumer behavior", "online habits", "let your brand grow", or sales pitches. The destination page name or category must NEVER change the topic of the post.
-3. WHAT A VARIATION IS: A variation means expressing the exact same core message using:
-   - A different opening hook (e.g. thought-provoking question, vivid imagery, reflective thought, inspiring observation)
-   - Different phrasing and vocabulary
-   - Different formatting (e.g. clean short paragraphs or reflective bullet points)
-   - Relevant, fitting emojis (e.g. 🌿 🍃 🐾 🌸 for nature)
-4. Keep each variation clean, ready-to-post, and under 2000 characters.
-5. Do NOT include any prefixes like "Variation 1:" or markdown code blocks.
+Instructions:
+1. Rewrite the given text in other words.
+2. Keep the exact same meaning, message, and context of the original text.
+3. For each variation, use different vocabulary, different sentence phrasing, and different opening hooks so that each variation reads fresh and distinct.
+4. Add relevant emojis that match the text naturally.
+5. Keep each variation clean, ready-to-post, and under 2000 characters.
+6. Strictly rewrite what the user provided without adding unrelated topics or outside themes.
 
 OUTPUT FORMAT: Return ONLY a valid JSON array of strings containing exactly ${count} items. Do NOT wrap in markdown codeblocks. Do NOT add preamble or explanations.
 Example format:
-["First variation text...", "Second variation text...", "Third variation text..."]`;
+["First rewritten variation...", "Second rewritten variation...", "Third rewritten variation..."]`;
 
   const raw = await generateCompletion(systemPrompt, text);
 
